@@ -3,20 +3,39 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+
 dotenv.config();
 
-
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3003;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
 const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
-const BASEROW_TABLE_ID = process.env.BASEROW_TABLE_ID || "948083";
-const BASEROW_VIEW_ID = process.env.BASEROW_VIEW_ID || "1859321";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
+
+const SAREE_TABLES = [
+  { name: "Kanjivaram Silks", tableId: 948083 },
+  { name: "Pure Silk Sarees", tableId: 935204 },
+  { name: "Tussar Silk Saree", tableId: 948245 },
+  { name: "South Weaves", tableId: 935205 },
+  { name: "Soft Silk Sarees", tableId: 935207 },
+  { name: "Patola & Orissa", tableId: 935208 },
+  { name: "Printed Pure Silk", tableId: 935203 },
+  { name: "Cotton Silk Sarees", tableId: 935215 },
+  { name: "Paithani Silk Sarees", tableId: 935206 },
+  { name: "Banarasi Georgette", tableId: 935209 },
+  { name: "Banarasi Silk", tableId: 935210 },
+  { name: "Banarasi Kora", tableId: 935211 },
+  { name: "Gadwal Handloom", tableId: 935213 },
+  { name: "Jamawar Silk", tableId: 935214 },
+  { name: "Cotton Saree", tableId: 935216 },
+  { name: "Linen & Kota", tableId: 935217 },
+  { name: "Art Silk", tableId: 935218 },
+  { name: "Bandhani Silk", tableId: 935212 },
+];
 
 const FIELD_IDS = {
   shopify: "field_8616094",
@@ -42,6 +61,14 @@ function assertConfig() {
   }
 }
 
+function getTableConfig(tableId) {
+  return SAREE_TABLES.find((table) => String(table.tableId) === String(tableId));
+}
+
+function getTableConfigByName(name) {
+  return SAREE_TABLES.find((table) => table.name.toLowerCase() === String(name || "").toLowerCase());
+}
+
 function getSelectValue(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -51,38 +78,31 @@ function getSelectValue(value) {
 
 function getFileUrl(field) {
   if (!Array.isArray(field) || field.length === 0) return null;
-
   const file = field[0];
-
-  return (
-    file?.url ||
-    file?.thumbnails?.card_cover?.url ||
-    file?.thumbnails?.small?.url ||
-    null
-  );
-}
-
-function getAllFileUrls(field) {
-  if (!Array.isArray(field)) return [];
-  return field
-    .map((file) => file?.url || file?.thumbnails?.card_cover?.url || file?.thumbnails?.small?.url || null)
-    .filter(Boolean);
+  return file?.url || file?.thumbnails?.card_cover?.url || file?.thumbnails?.small?.url || null;
 }
 
 function parsePrice(value) {
   if (value === null || value === undefined || value === "") return 0;
   if (typeof value === "number") return value;
-  const cleaned = String(value).replace(/[^\d.]/g, "");
-  const parsed = Number(cleaned);
+  const parsed = Number(String(value).replace(/[^\d.]/g, ""));
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function normalizeProduct(row) {
+function isApprovedGeneration(row) {
+  const value = row["Generation Status"];
+  return value?.value === "Approved" || value?.id === 5987929 || value === "Approved";
+}
+
+function normalizeProduct(row, tableConfig) {
   return {
-    id: row.id,
+    id: `${tableConfig.tableId}-${row.id}`,
+    rowId: row.id,
+    tableId: tableConfig.tableId,
+    collectionName: tableConfig.name,
     code: row["Product Code"] || row["SKU"] || row["Product SKU"] || `ROW-${row.id}`,
     title: row["Product Title"] || row["Title"] || "Untitled Saree",
-    category: getSelectValue(row["Category"]) || "Uncategorized",
+    category: getSelectValue(row["Category"]) || tableConfig.name,
     price: parsePrice(row["Price (INR)"] || row["Price"] || row["Pri..."]),
     generationStatus: getSelectValue(row["Generation Status"]),
     approvalStatus: getSelectValue(row["Approvel"]) || getSelectValue(row["Approval"]) || "Pending Review",
@@ -106,51 +126,49 @@ function normalizeProduct(row) {
       close: getFileUrl(row["Close Up View"]),
       grid: getFileUrl(row["Grid View"]),
       video: getFileUrl(row["Video"]),
-      allVideos: getAllFileUrls(row["Video"]),
     },
   };
 }
 
-function matchesCategory(product, category) {
-  if (!category || category === "All Collections") return true;
-
-  const categoryValue = String(product.category || "").toLowerCase();
-  const specs = String(product.specifications || "").toLowerCase();
-  const target = String(category || "").toLowerCase();
-
-  const aliases = {
-    "kanjivaram silks": ["kanjivaram", "kanjeevaram", "kanchipuram", "kanjivaram sarees collection"],
-    "pure silk sarees": ["pure silk"],
-    "tussar silk saree": ["tussar", "tussar silk"],
-    "south weaves – south silk sarees": ["south silk", "south weaves"],
-    "soft silk sarees": ["soft silk"],
-    "patola & orissa silk sarees": ["patola", "orissa"],
-    "printed pure silk sarees": ["printed pure silk"],
-    "cotton silk sarees": ["cotton silk"],
-    "paithani silk sarees": ["paithani"],
-    "banarasi georgette silk sarees": ["banarasi georgette"],
-    "banarasi silk sarees": ["banarasi silk"],
-    "banarasi kora silk saree": ["banarasi kora"],
-    "gadwal handloom": ["gadwal"],
-    "jamawar silk sarees": ["jamawar"],
-    "cotton saree": ["cotton saree", "cotton sarees"],
-    "linen & kota silk sarees": ["linen", "kota"],
-    "art silk sarees": ["art silk"],
-    "bandhani silk saree": ["bandhani"],
-  };
-
-  const words = aliases[target] || [target];
-
-  return words.some((word) => categoryValue.includes(word) || specs.includes(word));
+function sortProducts(products, sort) {
+  if (sort === "Price High to Low") {
+    products.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+  } else if (sort === "Price Low to High") {
+    products.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+  } else if (sort === "Title A-Z") {
+    products.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+  }
 }
 
-async function fetchBaserowRowsInternal(useView = true) {
+function applyProductFilters(products, { search, status, sort }) {
+  let filtered = [...products];
+
+  if (search) {
+    const q = String(search).toLowerCase();
+    filtered = filtered.filter((product) =>
+      String(product.code || "").toLowerCase().includes(q) ||
+      String(product.title || "").toLowerCase().includes(q)
+    );
+  }
+
+  if (status && status !== "All Statuses") {
+    filtered = filtered.filter((product) =>
+      product.generationStatus === status ||
+      product.approvalStatus === status ||
+      product.shopify === status
+    );
+  }
+
+  sortProducts(filtered, sort);
+  return filtered;
+}
+
+async function fetchBaserowRows(tableId) {
   assertConfig();
 
   let page = 1;
   let allRows = [];
   let hasNext = true;
-  let firstUrl = "";
 
   while (hasNext) {
     const params = new URLSearchParams({
@@ -159,13 +177,7 @@ async function fetchBaserowRowsInternal(useView = true) {
       page: String(page),
     });
 
-    if (useView && BASEROW_VIEW_ID && String(BASEROW_VIEW_ID).trim() !== "") {
-      params.set("view_id", String(BASEROW_VIEW_ID));
-    }
-
-    const url = `${BASEROW_API_URL}/api/database/rows/table/${BASEROW_TABLE_ID}/?${params.toString()}`;
-    if (!firstUrl) firstUrl = url;
-
+    const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/?${params.toString()}`;
     const response = await fetch(url, {
       headers: {
         Authorization: `Token ${BASEROW_TOKEN}`,
@@ -176,10 +188,12 @@ async function fetchBaserowRowsInternal(useView = true) {
     const data = await response.json();
 
     if (!response.ok) {
-      const error = new Error(data.error || `Baserow fetch failed`);
+      const details = typeof data === "object" ? JSON.stringify(data) : String(data);
+      const error = new Error(`Baserow fetch failed for table ${tableId}: ${details}`);
       error.status = response.status;
-      error.errorType = data.error;
-      error.detail = data.detail;
+      error.baserow = data;
+      error.errorType = data?.error || null;
+      error.tableId = tableId;
       throw error;
     }
 
@@ -188,30 +202,41 @@ async function fetchBaserowRowsInternal(useView = true) {
     page += 1;
   }
 
-  return { rows: allRows, finalUrl: firstUrl };
+  return allRows;
 }
 
-async function fetchBaserowRows() {
-  try {
-    if (BASEROW_VIEW_ID && String(BASEROW_VIEW_ID).trim() !== "") {
-      return await fetchBaserowRowsInternal(true);
-    } else {
-      return await fetchBaserowRowsInternal(false);
+async function fetchApprovedForTable(tableConfig) {
+  const rows = await fetchBaserowRows(tableConfig.tableId);
+  const approvedRows = rows.filter(isApprovedGeneration);
+  return {
+    tableConfig,
+    rows,
+    approvedRows,
+    products: approvedRows.map((row) => normalizeProduct(row, tableConfig)),
+  };
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = [];
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
     }
-  } catch (error) {
-    if (BASEROW_VIEW_ID && String(BASEROW_VIEW_ID).trim() !== "" && error.errorType !== "ERROR_NO_PERMISSION_TO_TABLE") {
-      console.warn("View-based fetch failed, retrying without view_id...", error.message);
-      return await fetchBaserowRowsInternal(false);
-    }
-    throw error;
   }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, runWorker);
+  await Promise.all(workers);
+  return results;
 }
 
-async function patchBaserowRow(rowId, payload, userFieldNames = true) {
+async function patchBaserowRow(tableId, rowId, payload, userFieldNames = true) {
   assertConfig();
 
-  const url = `${BASEROW_API_URL}/api/database/rows/table/${BASEROW_TABLE_ID}/${rowId}/?user_field_names=${userFieldNames ? "true" : "false"}`;
-
+  const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/${rowId}/?user_field_names=${userFieldNames ? "true" : "false"}`;
   const response = await fetch(url, {
     method: "PATCH",
     headers: {
@@ -226,11 +251,11 @@ async function patchBaserowRow(rowId, payload, userFieldNames = true) {
 
   if (!response.ok) {
     const details = typeof data === "object" ? JSON.stringify(data) : String(data);
-    const error = new Error(`Baserow update failed: ${details}`);
+    const error = new Error(`Baserow update failed for table ${tableId}, row ${rowId}: ${details}`);
     error.status = response.status;
     error.errorType = data?.error || null;
-
-    // Detect permission-specific failures
+    error.tableId = tableId;
+    error.rowId = rowId;
     if (response.status === 401 || response.status === 403 || data?.error === "ERROR_NO_PERMISSION_TO_TABLE") {
       error.isPermissionError = true;
     }
@@ -240,16 +265,14 @@ async function patchBaserowRow(rowId, payload, userFieldNames = true) {
   return data;
 }
 
-async function updateBaserowRow(rowId, userFieldPayload, fieldIdPayload) {
+async function updateBaserowRow(tableId, rowId, userFieldPayload, fieldIdPayload) {
   try {
-    return await patchBaserowRow(rowId, userFieldPayload, true);
+    return await patchBaserowRow(tableId, rowId, userFieldPayload, true);
   } catch (firstError) {
     if (!fieldIdPayload) throw firstError;
-
-    console.log(`Retrying with field IDs for row ${rowId}...`);
-    console.warn(`Baserow string select update failed for row ${rowId}; retrying with field IDs.`);
+    console.warn(`Baserow string select update failed for table ${tableId}, row ${rowId}; retrying with field IDs.`);
     try {
-      return await patchBaserowRow(rowId, fieldIdPayload, false);
+      return await patchBaserowRow(tableId, rowId, fieldIdPayload, false);
     } catch (secondError) {
       secondError.message = `${secondError.message}. Original string-field update error: ${firstError.message}`;
       throw secondError;
@@ -257,417 +280,307 @@ async function updateBaserowRow(rowId, userFieldPayload, fieldIdPayload) {
   }
 }
 
-app.get("/api/health", async (req, res) => {
+function updatePermissionResponse(res, error) {
+  return res.status(error.status || 403).json({
+    success: false,
+    tableId: error.tableId,
+    rowId: error.rowId,
+    error: "Baserow token can read this table but cannot update one or more required fields.",
+    detail: error.message,
+    fix: [
+      "Open Baserow database token settings.",
+      `Grant update access to table ${error.tableId}.`,
+      "Grant update access to SHOPIFY.",
+      "Grant update access to Approvel.",
+      "Grant update access to Comment.",
+      "Restart Node server.",
+    ],
+  });
+}
+
+app.get("/api/health", (req, res) => {
   try {
     assertConfig();
     res.json({
       success: true,
       message: "Backend is running. Baserow token is configured.",
-      tableId: BASEROW_TABLE_ID,
-      viewId: BASEROW_VIEW_ID,
+      databaseId: BASEROW_DATABASE_ID,
+      tableMode: "multi-table",
+      totalTables: SAREE_TABLES.length,
     });
   } catch (error) {
-    res.status(error.status || 500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(error.status || 500).json({ success: false, error: error.message });
   }
+});
+
+app.get("/api/collections", async (req, res) => {
+  const collections = [];
+  const errors = [];
+
+  await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
+    try {
+      const { approvedRows } = await fetchApprovedForTable(tableConfig);
+      collections.push({
+        name: tableConfig.name,
+        tableId: tableConfig.tableId,
+        count: approvedRows.length,
+        error: null,
+      });
+    } catch (error) {
+      const item = {
+        name: tableConfig.name,
+        tableId: tableConfig.tableId,
+        count: 0,
+        error: error.baserow || error.message,
+      };
+      collections.push(item);
+      errors.push(item);
+    }
+  });
+
+  collections.sort((a, b) =>
+    SAREE_TABLES.findIndex((table) => table.tableId === a.tableId) -
+    SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
+  );
+
+  res.json({
+    success: true,
+    total: collections.reduce((sum, item) => sum + item.count, 0),
+    collections,
+    errors,
+  });
 });
 
 app.get("/api/products", async (req, res) => {
   try {
-    const { category, search, status, sort } = req.query;
+    const { tableId, collection, search, status, sort } = req.query;
+    let tablesToFetch = SAREE_TABLES;
+    let mode = "all-tables";
 
-    const { rows, finalUrl } = await fetchBaserowRows();
+    if (tableId) {
+      const tableConfig = getTableConfig(tableId);
+      if (!tableConfig) {
+        return res.status(400).json({ success: false, error: `Unknown tableId ${tableId}` });
+      }
+      tablesToFetch = [tableConfig];
+      mode = "table";
+    } else if (collection) {
+      const tableConfig = getTableConfigByName(collection);
+      if (!tableConfig) {
+        return res.status(400).json({ success: false, error: `Unknown collection ${collection}` });
+      }
+      tablesToFetch = [tableConfig];
+      mode = "collection";
+    }
 
-    const approvedRows = rows.filter((row) => {
-      const generationStatus = row["Generation Status"];
-      return generationStatus?.value === "Approved" || generationStatus?.id === 5987929 || generationStatus === "Approved";
+    const products = [];
+    const collections = [];
+    const errors = [];
+
+    await mapWithConcurrency(tablesToFetch, 4, async (tableConfig) => {
+      try {
+        const result = await fetchApprovedForTable(tableConfig);
+        products.push(...result.products);
+        collections.push({
+          name: tableConfig.name,
+          tableId: tableConfig.tableId,
+          count: result.products.length,
+          error: null,
+        });
+      } catch (error) {
+        const item = {
+          name: tableConfig.name,
+          tableId: tableConfig.tableId,
+          count: 0,
+          error: error.baserow || error.message,
+        };
+        collections.push(item);
+        errors.push(item);
+      }
     });
 
-    let products = approvedRows.map(normalizeProduct);
+    collections.sort((a, b) =>
+      SAREE_TABLES.findIndex((table) => table.tableId === a.tableId) -
+      SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
+    );
 
-    if (category) {
-      products = products.filter((product) => matchesCategory(product, category));
-    }
-
-    if (search) {
-      const q = String(search).toLowerCase();
-      products = products.filter((product) =>
-        String(product.code || "").toLowerCase().includes(q) ||
-        String(product.title || "").toLowerCase().includes(q)
-      );
-    }
-
-    if (status && status !== "All Statuses") {
-      products = products.filter((product) =>
-        product.generationStatus === status ||
-        product.approvalStatus === status ||
-        product.shopify === status
-      );
-    }
-
-    if (sort === "Price High to Low") {
-      products.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
-    } else if (sort === "Price Low to High") {
-      products.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
-    } else if (sort === "Title A-Z") {
-      products.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
-    }
-
-    console.log("Final Baserow URL", finalUrl);
-    console.log("Total rows fetched", rows.length);
-    console.log("Rows after Generation Status Approved filter", approvedRows.length);
-    console.log("Rows after category/search/status filters", products.length);
-    console.log("First product code", products[0]?.code || "");
-    console.log("First product Grid View URL", products[0]?.images?.grid || "");
+    const filteredProducts = applyProductFilters(products, { search, status, sort });
 
     res.json({
       success: true,
-      count: products.length,
-      products,
+      count: filteredProducts.length,
+      products: filteredProducts,
+      collections,
+      errors,
       debug: {
-        tableId: BASEROW_TABLE_ID,
-        viewId: BASEROW_VIEW_ID,
-        totalRows: rows.length,
-        approvedRows: approvedRows.length,
-        filteredRows: products.length,
+        mode,
+        totalTables: tablesToFetch.length,
+        successfulTables: collections.filter((item) => !item.error).length,
+        failedTables: errors.length,
         filter: "Generation Status = Approved",
       },
     });
   } catch (error) {
     console.error(error);
-    if (error.errorType === "ERROR_NO_PERMISSION_TO_TABLE") {
-      return res.status(403).json({
-        success: false,
-        error: "Unable to connect with Baserow due to missing permissions.",
-        errorType: "ERROR_NO_PERMISSION_TO_TABLE",
-        fix: [
-          "Open your Baserow database settings",
-          "Go to Database Tokens",
-          "Ensure the token has Read/Write access to table 948083"
-        ]
-      });
-    }
-    res.status(error.status || 500).json({
-      success: false,
-      error: error.message,
-    });
+    res.status(error.status || 500).json({ success: false, error: error.message });
   }
 });
 
-app.patch("/api/products/:rowId/approve", async (req, res) => {
+app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
   try {
-    const { rowId } = req.params;
-    console.log(`PATCH approve rowId=${rowId}`);
-
-    if (!rowId || isNaN(Number(rowId))) {
-      return res.status(400).json({ success: false, error: "Invalid or missing rowId." });
-    }
+    const { tableId, rowId } = req.params;
+    const tableConfig = getTableConfig(tableId);
+    if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
     const updatedRow = await updateBaserowRow(
+      tableId,
       rowId,
       { SHOPIFY: "Approved" },
-      { [FIELD_IDS.shopify]: OPTION_IDS.shopifyApproved },
+      { [FIELD_IDS.shopify]: OPTION_IDS.shopifyApproved }
     );
 
     res.json({
       success: true,
       message: "Product approved for Shopify.",
-      row: normalizeProduct(updatedRow),
+      row: normalizeProduct(updatedRow, tableConfig),
     });
   } catch (error) {
     console.error(error);
-    if (error.isPermissionError || error.status === 401 || error.status === 403) {
-      return res.status(403).json({
-        success: false,
-        error: "Baserow token can read this table but cannot update one or more required fields.",
-        fix: [
-          "Open Baserow database token settings",
-          "Grant update access to SHOPIFY",
-          "Grant update access to Approvel",
-          "Grant update access to Comment",
-          "Restart Node server"
-        ]
-      });
-    }
-    res.status(error.status || 500).json({
-      success: false,
-      error: error.message,
-    });
+    if (error.isPermissionError || error.status === 401 || error.status === 403) return updatePermissionResponse(res, error);
+    res.status(error.status || 500).json({ success: false, tableId: error.tableId, rowId: error.rowId, error: error.message });
   }
 });
 
-app.patch("/api/products/:rowId/request-changes", async (req, res) => {
+app.patch("/api/products/:tableId/:rowId/request-changes", async (req, res) => {
   try {
-    const { rowId } = req.params;
-    console.log(`PATCH request-changes rowId=${rowId}`);
-
-    if (!rowId || isNaN(Number(rowId))) {
-      return res.status(400).json({ success: false, error: "Invalid or missing rowId." });
-    }
+    const { tableId, rowId } = req.params;
+    const tableConfig = getTableConfig(tableId);
+    if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
     const { changeType = "Other", comment = "" } = req.body || {};
-
     const finalComment = `Change Type: ${changeType}\n\n${comment || "Changes requested from review portal."}`;
-
     const updatedRow = await updateBaserowRow(
+      tableId,
       rowId,
-      {
-        SHOPIFY: "Reject",
-        Approvel: "Reject",
-        Comment: finalComment,
-      },
+      { SHOPIFY: "Reject", Approvel: "Reject", Comment: finalComment },
       {
         [FIELD_IDS.shopify]: OPTION_IDS.shopifyReject,
         [FIELD_IDS.approvel]: OPTION_IDS.approvelReject,
         [FIELD_IDS.comment]: finalComment,
-      },
+      }
     );
 
     res.json({
       success: true,
       message: "Request changes saved.",
-      row: normalizeProduct(updatedRow),
+      row: normalizeProduct(updatedRow, tableConfig),
     });
   } catch (error) {
     console.error(error);
-    if (error.isPermissionError || error.status === 401 || error.status === 403) {
-      return res.status(403).json({
-        success: false,
-        error: "Baserow token can read this table but cannot update one or more required fields.",
-        fix: [
-          "Open Baserow database token settings",
-          "Grant update access to SHOPIFY",
-          "Grant update access to Approvel",
-          "Grant update access to Comment",
-          "Restart Node server"
-        ]
-      });
-    }
-    res.status(error.status || 500).json({
-      success: false,
-      error: error.message,
-    });
+    if (error.isPermissionError || error.status === 401 || error.status === 403) return updatePermissionResponse(res, error);
+    res.status(error.status || 500).json({ success: false, tableId: error.tableId, rowId: error.rowId, error: error.message });
   }
 });
 
-app.patch("/api/products/:rowId/reject", async (req, res) => {
+app.patch("/api/products/:tableId/:rowId/reject", async (req, res) => {
   try {
-    const { rowId } = req.params;
-    console.log(`PATCH reject rowId=${rowId}`);
-
-    if (!rowId || isNaN(Number(rowId))) {
-      return res.status(400).json({ success: false, error: "Invalid or missing rowId." });
-    }
+    const { tableId, rowId } = req.params;
+    const tableConfig = getTableConfig(tableId);
+    if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
     const { comment = "Rejected from review portal" } = req.body || {};
-
     const updatedRow = await updateBaserowRow(
+      tableId,
       rowId,
-      {
-        SHOPIFY: "Reject",
-        Approvel: "Reject",
-        Comment: comment,
-      },
+      { SHOPIFY: "Reject", Approvel: "Reject", Comment: comment },
       {
         [FIELD_IDS.shopify]: OPTION_IDS.shopifyReject,
         [FIELD_IDS.approvel]: OPTION_IDS.approvelReject,
         [FIELD_IDS.comment]: comment,
-      },
+      }
     );
 
     res.json({
       success: true,
       message: "Product rejected.",
-      row: normalizeProduct(updatedRow),
+      row: normalizeProduct(updatedRow, tableConfig),
     });
   } catch (error) {
     console.error(error);
-    if (error.isPermissionError || error.status === 401 || error.status === 403) {
-      return res.status(403).json({
-        success: false,
-        error: "Baserow token can read this table but cannot update one or more required fields.",
-        fix: [
-          "Open Baserow database token settings",
-          "Grant update access to SHOPIFY",
-          "Grant update access to Approvel",
-          "Grant update access to Comment",
-          "Restart Node server"
-        ]
-      });
-    }
-    res.status(error.status || 500).json({
-      success: false,
-      error: error.message,
-    });
+    if (error.isPermissionError || error.status === 401 || error.status === 403) return updatePermissionResponse(res, error);
+    res.status(error.status || 500).json({ success: false, tableId: error.tableId, rowId: error.rowId, error: error.message });
   }
 });
 
-function maskToken(token) {
-  if (!token) return "missing";
-  if (token.length <= 8) return "configured-but-too-short";
-  return `${token.slice(0, 4)}...${token.slice(-4)}`;
-}
+app.patch("/api/products/:rowId/approve", (req, res) => {
+  res.status(400).json({
+    success: false,
+    error: "Legacy route cannot update multi-table rows. Use /api/products/:tableId/:rowId/approve.",
+  });
+});
+
+app.patch("/api/products/:rowId/request-changes", (req, res) => {
+  res.status(400).json({
+    success: false,
+    error: "Legacy route cannot update multi-table rows. Use /api/products/:tableId/:rowId/request-changes.",
+  });
+});
+
+app.patch("/api/products/:rowId/reject", (req, res) => {
+  res.status(400).json({
+    success: false,
+    error: "Legacy route cannot update multi-table rows. Use /api/products/:tableId/:rowId/reject.",
+  });
+});
 
 app.get("/api/baserow/diagnose", async (req, res) => {
-  const tokenConfigured = !!BASEROW_TOKEN;
-  const tokenMasked = maskToken(BASEROW_TOKEN);
+  try {
+    assertConfig();
+    const tables = [];
 
-  const diagnostic = {
-    success: false,
-    config: {
-      apiUrl: BASEROW_API_URL,
-      databaseId: BASEROW_DATABASE_ID || null,
-      tableId: BASEROW_TABLE_ID,
-      viewId: BASEROW_VIEW_ID,
-      tokenConfigured,
-      tokenMasked,
-    },
-    tests: {
-      tokenAccessibleTables: null,
-      targetTableWithoutView: null,
-      targetTableWithView: null,
-      fieldsEndpoint: null,
-    },
-    finalDiagnosis: "",
-    fix: [],
-    nextSteps: [],
-  };
+    await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
+      try {
+        const { approvedRows } = await fetchApprovedForTable(tableConfig);
+        tables.push({
+          name: tableConfig.name,
+          tableId: tableConfig.tableId,
+          readAccess: true,
+          approvedRows: approvedRows.length,
+          error: null,
+        });
+      } catch (error) {
+        tables.push({
+          name: tableConfig.name,
+          tableId: tableConfig.tableId,
+          readAccess: false,
+          approvedRows: 0,
+          error: error.baserow || error.message,
+        });
+      }
+    });
 
-  if (!tokenConfigured) {
-    diagnostic.finalDiagnosis = "REST token is missing in .env";
-    diagnostic.fix = [
-      "Open your .env file",
-      "Add BASEROW_TOKEN=your_token_value",
-      "Restart the backend server"
-    ];
-    diagnostic.nextSteps = diagnostic.fix;
-    return res.json(diagnostic);
+    tables.sort((a, b) =>
+      SAREE_TABLES.findIndex((table) => table.tableId === a.tableId) -
+      SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
+    );
+
+    const accessibleTables = tables.filter((table) => table.readAccess).length;
+    const failedTables = tables.length - accessibleTables;
+
+    res.json({
+      success: failedTables === 0,
+      databaseId: BASEROW_DATABASE_ID,
+      tables,
+      summary: {
+        totalTables: SAREE_TABLES.length,
+        accessibleTables,
+        failedTables,
+        totalApprovedRows: tables.reduce((sum, table) => sum + table.approvedRows, 0),
+      },
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, error: error.message });
   }
-
-  const checkEndpoint = async (url) => {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Token ${BASEROW_TOKEN}`,
-          Accept: "application/json",
-        },
-      });
-      const data = await response.json();
-      return {
-        status: response.status,
-        ok: response.ok,
-        data,
-      };
-    } catch (error) {
-      return {
-        status: 500,
-        ok: false,
-        error: error.message,
-      };
-    }
-  };
-
-  // Test 1: Accessible tables
-  const tablesResult = await checkEndpoint(`${BASEROW_API_URL}/api/database/tables/all-tables/`);
-  diagnostic.tests.tokenAccessibleTables = {
-    status: tablesResult.status,
-    ok: tablesResult.ok,
-    tables: tablesResult.ok && Array.isArray(tablesResult.data)
-      ? tablesResult.data.map(t => ({ id: t.id, name: t.name, databaseId: t.database_id }))
-      : null,
-    error: !tablesResult.ok ? (tablesResult.data || tablesResult.error) : null,
-  };
-
-  // Test 2: Target table without view
-  const noViewResult = await checkEndpoint(`${BASEROW_API_URL}/api/database/rows/table/${BASEROW_TABLE_ID}/?user_field_names=true&size=1`);
-  diagnostic.tests.targetTableWithoutView = {
-    status: noViewResult.status,
-    ok: noViewResult.ok,
-    error: !noViewResult.ok ? (noViewResult.data || noViewResult.error) : null,
-  };
-
-  // Test 3: Target table with view
-  let viewUrl = `${BASEROW_API_URL}/api/database/rows/table/${BASEROW_TABLE_ID}/?user_field_names=true&size=1`;
-  if (BASEROW_VIEW_ID) {
-    viewUrl += `&view_id=${BASEROW_VIEW_ID}`;
-  }
-  const withViewResult = await checkEndpoint(viewUrl);
-  diagnostic.tests.targetTableWithView = {
-    status: withViewResult.status,
-    ok: withViewResult.ok,
-    error: !withViewResult.ok ? (withViewResult.data || withViewResult.error) : null,
-  };
-
-  // Test 4: Fields endpoint
-  const fieldsResult = await checkEndpoint(`${BASEROW_API_URL}/api/database/fields/table/${BASEROW_TABLE_ID}/`);
-  diagnostic.tests.fieldsEndpoint = {
-    status: fieldsResult.status,
-    ok: fieldsResult.ok,
-    error: !fieldsResult.ok ? (fieldsResult.data || fieldsResult.error) : null,
-  };
-
-  // Final diagnosis logic
-  const allTablesOk = tablesResult.ok && Array.isArray(tablesResult.data);
-  const targetTableInAll = allTablesOk && tablesResult.data.some(t => String(t.id) === String(BASEROW_TABLE_ID));
-  const hasOtherDatabaseAccess = allTablesOk && tablesResult.data.some(t => String(t.database_id) !== String(BASEROW_DATABASE_ID));
-  const noViewOk = noViewResult.ok;
-  const withViewOk = withViewResult.ok;
-  const fieldsOk = fieldsResult.ok;
-
-  const noViewErrorType = noViewResult.data?.error;
-  const withViewErrorType = withViewResult.data?.error;
-
-  const targetPermissionFix = [
-    "Open Baserow database 419522.",
-    "Go to Database Tokens / API Token settings.",
-    "Create a new REST database token inside database 419522.",
-    "Grant Read access to table 948083.",
-    "Grant Update access to table 948083.",
-    "Grant update access to fields SHOPIFY, Approvel, Comment.",
-    "Paste the new REST database token into .env as BASEROW_TOKEN.",
-    "Restart Node server."
-  ];
-
-  if ((allTablesOk && !targetTableInAll) || (hasOtherDatabaseAccess && noViewErrorType === "ERROR_NO_PERMISSION_TO_TABLE")) {
-    diagnostic.finalDiagnosis = "The REST token is valid, but it belongs to a different database or does not have permission to table 948083 in database 419522.";
-    diagnostic.fix = targetPermissionFix;
-    diagnostic.nextSteps = targetPermissionFix;
-  } else if (noViewOk && !withViewOk) {
-    diagnostic.finalDiagnosis = "Table access works, but BASEROW_VIEW_ID is invalid or inaccessible.";
-    diagnostic.fix = [
-      "Clear BASEROW_VIEW_ID or replace it with the correct view ID.",
-      `Check if view ID ${BASEROW_VIEW_ID} exists in table ${BASEROW_TABLE_ID}.`,
-      "Restart Node server."
-    ];
-    diagnostic.nextSteps = diagnostic.fix;
-  } else if (noViewErrorType === "ERROR_NO_PERMISSION_TO_TABLE" && withViewErrorType === "ERROR_NO_PERMISSION_TO_TABLE") {
-    diagnostic.finalDiagnosis = "The REST token is valid, but it belongs to a different database or does not have permission to table 948083 in database 419522.";
-    diagnostic.fix = targetPermissionFix;
-    diagnostic.nextSteps = targetPermissionFix;
-  } else if (!fieldsOk && noViewOk) {
-    diagnostic.finalDiagnosis = "Token can read rows but may not inspect fields.";
-    diagnostic.fix = [
-      "Grant field/schema access for table 948083 if field inspection is required.",
-      "Rows may still work, but validation cannot confirm field names."
-    ];
-    diagnostic.nextSteps = diagnostic.fix;
-  } else if (noViewOk && withViewOk) {
-    diagnostic.success = true;
-    diagnostic.finalDiagnosis = "REST API connection is working.";
-    diagnostic.fix = [];
-    diagnostic.nextSteps = ["No action needed."];
-  } else {
-    diagnostic.finalDiagnosis = "REST token lacks table permission or token is completely invalid.";
-    diagnostic.fix = [
-      "Verify the BASEROW_TOKEN matches the REST database token created in Baserow settings",
-      "Verify that the token is not expired or deleted"
-    ];
-    diagnostic.nextSteps = diagnostic.fix;
-  }
-
-  res.json(diagnostic);
 });
 
 app.get("*", (req, res) => {

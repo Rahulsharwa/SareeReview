@@ -1223,30 +1223,51 @@
   <script>
     // Live data only. The Baserow token belongs in backend .env, never in this file.
 
-    const categories = [
-      'All Collections',
-      'Kanjivaram Silks',
-      'Pure Silk Sarees',
-      'Tussar Silk Saree',
-      'South Weaves – South Silk Sarees',
-      'Soft Silk Sarees',
-      'Patola & Orissa Silk Sarees',
-      'Printed Pure Silk Sarees',
-      'Cotton Silk Sarees',
-      'Paithani Silk Sarees',
-      'Banarasi Georgette Silk Sarees',
-      'Banarasi Silk Sarees',
-      'Banarasi Kora Silk Saree',
-      'Gadwal Handloom',
-      'Jamawar Silk Sarees',
-      'Cotton Saree',
-      'Linen & Kota Silk Sarees',
-      'Art Silk Sarees',
-      'Bandhani Silk Saree'
+    const SAREE_TABLES = [
+      { name: "All Collections", tableId: "all" },
+      { name: "Kanjivaram Silks", tableId: 948083 },
+      { name: "Pure Silk Sarees", tableId: 935204 },
+      { name: "Tussar Silk Saree", tableId: 948245 },
+      { name: "South Weaves", tableId: 935205 },
+      { name: "Soft Silk Sarees", tableId: 935207 },
+      { name: "Patola & Orissa", tableId: 935208 },
+      { name: "Printed Pure Silk", tableId: 935203 },
+      { name: "Cotton Silk Sarees", tableId: 935215 },
+      { name: "Paithani Silk Sarees", tableId: 935206 },
+      { name: "Banarasi Georgette", tableId: 935209 },
+      { name: "Banarasi Silk", tableId: 935210 },
+      { name: "Banarasi Kora", tableId: 935211 },
+      { name: "Gadwal Handloom", tableId: 935213 },
+      { name: "Jamawar Silk", tableId: 935214 },
+      { name: "Cotton Saree", tableId: 935216 },
+      { name: "Linen & Kota", tableId: 935217 },
+      { name: "Art Silk", tableId: 935218 },
+      { name: "Bandhani Silk", tableId: 935212 }
     ];
 
+    const categories = SAREE_TABLES.map(table => table.name);
     let products = [];
+    let collectionCounts = new Map();
     let isFetchingProducts = false;
+
+    async function fetchCollections() {
+      try {
+        const response = await fetch('/api/collections', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to fetch collections');
+        collectionCounts = new Map((data.collections || []).map(item => [String(item.tableId), item.count || 0]));
+        collectionCounts.set('all', data.total || 0);
+        renderCategories();
+        return data;
+      } catch (error) {
+        console.error('Collection count fetch failed:', error);
+        return null;
+      }
+    }
 
     async function fetchProductsFromAPI(options = {}) {
       if (isFetchingProducts) return;
@@ -1255,8 +1276,8 @@
       try {
         const params = new URLSearchParams();
 
-        if (state?.selectedCategory && state.selectedCategory !== 'All Collections') {
-          params.set('category', state.selectedCategory);
+        if (state?.selectedTableId && state.selectedTableId !== 'all') {
+          params.set('tableId', state.selectedTableId);
         }
 
         const q = document.getElementById('searchInput')?.value?.trim();
@@ -1336,6 +1357,8 @@
 
     let state = {
       selectedCategory: 'All Collections',
+      selectedTableId: 'all',
+      selectedCollectionName: 'All Collections',
       view: 'grid',
       selectedProductId: null,
       selectedGenerated: 'Front View',
@@ -1368,12 +1391,7 @@
 
     function filteredProducts() {
       const q = document.getElementById('searchInput')?.value?.toLowerCase() || '';
-      const cat = state.selectedCategory;
       let list = Array.isArray(products) ? [...products] : [];
-
-      if (cat !== 'All Collections') {
-        list = list.filter(p => String(p.category || '').toLowerCase().includes(cat.toLowerCase()));
-      }
 
       if (q) {
         list = list.filter(p =>
@@ -1429,16 +1447,21 @@
       const sel = document.getElementById('categorySelect');
       tabs.innerHTML = '';
       sel.innerHTML = '';
-      categories.forEach(cat => {
-      const count = cat === 'All Collections' ? products.length : products.filter(p => String(p.category || '').toLowerCase().includes(cat.toLowerCase())).length;
-        tabs.insertAdjacentHTML('beforeend', `<button class="tab ${state.selectedCategory === cat ? 'active' : ''}" onclick="selectCategory('${cat.replace(/'/g, "\\'")}')">${cat}<span class="count">${count}</span></button>`);
-        sel.insertAdjacentHTML('beforeend', `<option ${state.selectedCategory === cat ? 'selected' : ''}>${cat}</option>`);
+      SAREE_TABLES.forEach(table => {
+        const tableKey = String(table.tableId);
+        const count = collectionCounts.has(tableKey)
+          ? collectionCounts.get(tableKey)
+          : (tableKey === 'all' ? products.length : products.filter(p => String(p.tableId) === tableKey).length);
+        tabs.insertAdjacentHTML('beforeend', `<button class="tab ${String(state.selectedTableId) === tableKey ? 'active' : ''}" onclick="selectCategory('${table.name.replace(/'/g, "\\'")}', '${tableKey}')">${table.name}<span class="count">${count}</span></button>`);
+        sel.insertAdjacentHTML('beforeend', `<option value="${tableKey}" ${String(state.selectedTableId) === tableKey ? 'selected' : ''}>${table.name}</option>`);
       });
       document.getElementById('totalCount').textContent = filteredProducts().length;
     }
 
-    function selectCategory(cat) {
+    function selectCategory(cat, tableId = 'all') {
       state.selectedCategory = cat;
+      state.selectedCollectionName = cat;
+      state.selectedTableId = String(tableId);
       state.selectedProductId = null;
       fetchProductsFromAPI();
     }
@@ -1465,8 +1488,8 @@
                 ${p.images.video ? `<div class="mini-thumb zoom-wrap">${makeZoomable(p.images.video, 'Video')}</div>` : ''}
               </div>
               <div class="card-actions">
-                <button class="btn btn-neutral" onclick="selectProduct(${p.id}, 'detail')">Review</button>
-                <button class="btn btn-green" onclick="approveProduct(${p.id})">Approve</button>
+                <button class="btn btn-neutral" onclick="selectProduct('${p.id}', 'detail')">Review</button>
+                <button class="btn btn-green" onclick="approveProduct('${p.id}')">Approve</button>
               </div>
             </div>
           </article>
@@ -1541,7 +1564,7 @@
       document.getElementById('mobilePreview').innerHTML = `
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
-          <div class="phone-tabs">${categories.slice(1,5).map((c,i)=>`<span class="tab ${i===0?'active':''}">${c.split(' ')[0]}<span class="count">${i===0 ? 43 : 0}</span></span>`).join('')}</div>
+          <div class="phone-tabs">${SAREE_TABLES.slice(1,5).map((table,i)=>`<span class="tab ${i===0?'active':''}">${table.name.split(' ')[0]}<span class="count">${collectionCounts.get(String(table.tableId)) || 0}</span></span>`).join('')}</div>
           <div class="phone-card"><strong>${p.code}</strong><br>${p.title}<br><span class="price">${formatPrice(p.price)}</span><br><span class="badge">${p.generationStatus}</span></div>
           <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;"><button class="mini-tab active">Front</button><button class="mini-tab">Side</button><button class="mini-tab">Back</button><button class="mini-tab">Close-up</button></div><div class="phone-hero zoom-wrap">${makeZoomable(p.images.front, 'Mobile Front View')}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
@@ -1594,7 +1617,7 @@
       const sortSelect = document.getElementById('sortSelect');
 
       if (searchInput) searchInput.value = '';
-      if (categorySelect) categorySelect.value = 'All Collections';
+      if (categorySelect) categorySelect.value = 'all';
       if (statusSelect) statusSelect.value = 'All Statuses';
       if (sortSelect) sortSelect.value = 'Latest Updated';
 
@@ -1640,7 +1663,7 @@
       if (!p) return;
 
       try {
-        const response = await fetch(`/api/products/${p.id}/approve`, {
+        const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/approve`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({
@@ -1681,7 +1704,7 @@
       if (!p) return;
 
       try {
-        const response = await fetch(`/api/products/${p.id}/reject`, {
+        const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/reject`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({
@@ -1716,7 +1739,7 @@
       const comment = document.getElementById('changeComment')?.value || 'Changes requested from review portal';
 
       try {
-        const response = await fetch(`/api/products/${p.id}/request-changes`, {
+        const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/request-changes`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({ changeType, comment })
@@ -1910,7 +1933,10 @@ ${comment}`;
     document.getElementById('gridBtn').addEventListener('click', () => { state.view = 'grid'; renderAll(false); });
     document.getElementById('backMainBtn').addEventListener('click', backToMainMenu);
     document.getElementById('detailBtn').addEventListener('click', () => { state.view = 'detail'; renderAll(false); });
-    document.getElementById('categorySelect').addEventListener('change', e => selectCategory(e.target.value));
+    document.getElementById('categorySelect').addEventListener('change', e => {
+      const table = SAREE_TABLES.find(item => String(item.tableId) === String(e.target.value)) || SAREE_TABLES[0];
+      selectCategory(table.name, table.tableId);
+    });
     let searchDebounce;
     document.getElementById('searchInput').addEventListener('input', () => {
       clearTimeout(searchDebounce);
@@ -1924,7 +1950,7 @@ ${comment}`;
     document.getElementById('refreshBtn').addEventListener('click', () => fetchProductsFromAPI({ showToast: true }));
     setInterval(() => fetchProductsFromAPI(), 15000);
 
-    fetchProductsFromAPI();
+    fetchCollections().finally(() => fetchProductsFromAPI());
   </script>
 </body>
 </html>

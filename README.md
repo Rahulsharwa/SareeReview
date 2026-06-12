@@ -1,12 +1,6 @@
-# Janardhana Silk House — Baserow Live Saree Review Portal
+# Janardhana Silk House Baserow Saree Review Portal
 
-This package contains:
-
-- Express backend API
-- Live Baserow fetch from table `948083`
-- Frontend HTML UI served from `/public/index.html`
-- Approve / Request Changes / Reject PATCH routes
-- Token kept in `.env`, not frontend code
+Express backend and premium HTML frontend for reviewing Baserow-generated saree assets.
 
 ## Setup
 
@@ -15,30 +9,55 @@ npm install
 cp .env.example .env
 ```
 
-Paste your Baserow token into `.env`:
+Paste a REST database token into `.env`:
 
 ```env
-BASEROW_TOKEN=your_token_here
+BASEROW_API_URL=https://api.baserow.io
+BASEROW_DATABASE_ID=419522
+BASEROW_TOKEN=your_rest_database_token
+PORT=3003
 ```
 
-BASEROW_TOKEN must be a REST database token created inside Baserow database 419522.
-It must have:
-- Read access to table 948083
-- Update access to table 948083
-- Update access to fields: SHOPIFY, Approvel, Comment
+Do not use the MCP endpoint token as `BASEROW_TOKEN`.
+Do not put tokens in `public/index.html`.
 
-Do not paste the MCP endpoint token here.
-Do not paste a token from another database.
+## Multi-Table Mode
 
-Validate the token:
+The portal fetches each saree collection table separately and merges approved rows for All Collections. It does not use one global `view_id`, because Baserow view IDs are table-specific.
+
+Configured tables:
+
+| Collection | Table ID |
+|---|---:|
+| Kanjivaram Silks | 948083 |
+| Pure Silk Sarees | 935204 |
+| Tussar Silk Saree | 948245 |
+| South Weaves | 935205 |
+| Soft Silk Sarees | 935207 |
+| Patola & Orissa | 935208 |
+| Printed Pure Silk | 935203 |
+| Cotton Silk Sarees | 935215 |
+| Paithani Silk Sarees | 935206 |
+| Banarasi Georgette | 935209 |
+| Banarasi Silk | 935210 |
+| Banarasi Kora | 935211 |
+| Gadwal Handloom | 935213 |
+| Jamawar Silk | 935214 |
+| Cotton Saree | 935216 |
+| Linen & Kota | 935217 |
+| Art Silk | 935218 |
+| Bandhani Silk | 935212 |
+
+The REST token needs read/update access to all 18 tables and update access to these fields in each table:
+
+- `SHOPIFY`
+- `Approvel`
+- `Comment`
+
+## Commands
 
 ```bash
 npm run check:baserow
-```
-
-Then run:
-
-```bash
 npm run dev
 ```
 
@@ -48,109 +67,29 @@ Open:
 http://localhost:3003
 ```
 
-## API Endpoints
+## API
 
 ```text
 GET /api/health
+GET /api/baserow/diagnose
+GET /api/collections
 GET /api/products
-PATCH /api/products/:rowId/approve
-PATCH /api/products/:rowId/request-changes
-PATCH /api/products/:rowId/reject
+GET /api/products?tableId=935215
+GET /api/products?collection=Kanjivaram%20Silks
+PATCH /api/products/:tableId/:rowId/approve
+PATCH /api/products/:tableId/:rowId/request-changes
+PATCH /api/products/:tableId/:rowId/reject
 ```
 
-## Fetch Rule
+Row IDs can repeat across tables, so updates must include both `tableId` and `rowId`.
 
-Only rows where:
+Only rows where `Generation Status = Approved` appear in the portal.
 
-```text
-Generation Status = Approved
-```
-
-are returned to the frontend.
-
-## Update Rules
-
-Approve:
-
-```json
-{
-  "SHOPIFY": "Approved"
-}
-```
-
-Request Changes:
-
-```json
-{
-  "SHOPIFY": "Reject",
-  "Approvel": "Reject",
-  "Comment": "Change Type: ...\n\nfeedback..."
-}
-```
-
-Reject:
-
-```json
-{
-  "SHOPIFY": "Reject",
-  "Approvel": "Reject",
-  "Comment": "Rejected from review portal"
-}
-```
-
-## Security
-
-Do not put your Baserow token inside `public/index.html`.
-The frontend only calls your backend API.
-
-## Final Baserow Token Fix
-
-If `/api/products` returns `ERROR_NO_PERMISSION_TO_TABLE`, the code is not the problem.
-
-The backend uses a REST database token from `.env`:
-
-```env
-BASEROW_TOKEN=...
-```
-
-This token must be created in database `419522`, not another database.
-
-Required target:
-
-* Database ID: `419522`
-* Table ID: `948083`
-* View ID: `1859321`
-
-Required permissions:
-
-* Read rows from table `948083`
-* Update rows in table `948083`
-* Update fields:
-  * `SHOPIFY`
-  * `Approvel`
-  * `Comment`
-
-After creating the correct token:
-
-```bash
-npm run check:baserow
-npm run dev
-```
-
-Then test:
+## Test
 
 ```bash
 curl.exe -s http://localhost:3003/api/baserow/diagnose
+curl.exe -s http://localhost:3003/api/collections
 curl.exe -s http://localhost:3003/api/products
+curl.exe -s "http://localhost:3003/api/products?tableId=935215"
 ```
-
-Do not use your MCP endpoint token as `BASEROW_TOKEN`.
-Do not share your Baserow account password.
-
-## Baserow Tokens: REST vs MCP
-
-There are two distinct types of Baserow tokens used in this project:
-1. **REST Database Token**: Used by the Express backend to make direct REST API requests. It is configured in the `.env` file under `BASEROW_TOKEN`.
-2. **MCP Endpoint Token**: Used by the Codex/AI agent to connect to Baserow's Model Context Protocol (MCP) server. It is configured locally in `.mcp.json` as part of the remote connection URL: `https://api.baserow.io/mcp/<MCP_ENDPOINT_TOKEN>/sse`.
-
-*Note: Do not mix up these tokens or use the REST database token inside the MCP configuration unless Baserow explicitly generates that identical token for both.*

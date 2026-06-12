@@ -1,13 +1,39 @@
-## Final Remaining Blocker
+## Multi-table Baserow Sync Result
 
-The app code is ready.
-The only blocker is the REST database token.
+| Check | Result |
+|---|---|
+| Multi-table config added | ? |
+| /api/collections works | ? |
+| /api/products all tables works | ? |
+| /api/products?tableId works | ? |
+| PATCH routes include tableId | ? |
+| Frontend tabs use tableId | ? |
+| All Collections count is summed | ? |
+| Per-table permission errors handled | ? |
 
-Current issue:
-The token currently in `.env` does not have permission to database `419522` / table `948083`, or it was created for another database.
+## Table Access Summary
 
-Required fix:
-Create or paste a REST database token from database `419522` with read/update access to table `948083`.
+| Collection | Table ID | Read Access | Approved Rows | Error |
+|---|---:|---|---:|---|
+| Kanjivaram Silks | 948083 | ? | 43 |  |
+| Pure Silk Sarees | 935204 | ? | 16 |  |
+| Tussar Silk Saree | 948245 | ? | 30 |  |
+| South Weaves | 935205 | ? | 18 |  |
+| Soft Silk Sarees | 935207 | ? | 20 |  |
+| Patola & Orissa | 935208 | ? | 18 |  |
+| Printed Pure Silk | 935203 | ? | 3 |  |
+| Cotton Silk Sarees | 935215 | ? | 10 |  |
+| Paithani Silk Sarees | 935206 | ? | 6 |  |
+| Banarasi Georgette | 935209 | ? | 12 |  |
+| Banarasi Silk | 935210 | ? | 9 |  |
+| Banarasi Kora | 935211 | ? | 7 |  |
+| Gadwal Handloom | 935213 | ? | 13 |  |
+| Jamawar Silk | 935214 | ? | 1 |  |
+| Cotton Saree | 935216 | ? | 0 |  |
+| Linen & Kota | 935217 | ? | 1 |  |
+| Art Silk | 935218 | ? | 0 |  |
+| Bandhani Silk | 935212 | ? | 0 |  |
 
-Do not provide Baserow account password.
-Only update `.env` locally.
+Total approved rows: 207
+Accessible tables: 18
+Failed tables: 0
