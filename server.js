@@ -17,41 +17,175 @@ const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 
 const SAREE_TABLES = [
-  { name: "Kanjivaram Silks", tableId: 948083 },
-  { name: "Pure Silk Sarees", tableId: 935204 },
-  { name: "Tussar Silk Saree", tableId: 948245 },
-  { name: "South Weaves", tableId: 935205 },
-  { name: "Soft Silk Sarees", tableId: 935207 },
-  { name: "Patola & Orissa", tableId: 935208 },
-  { name: "Printed Pure Silk", tableId: 935203 },
-  { name: "Cotton Silk Sarees", tableId: 935215 },
-  { name: "Paithani Silk Sarees", tableId: 935206 },
-  { name: "Banarasi Georgette", tableId: 935209 },
-  { name: "Banarasi Silk", tableId: 935210 },
-  { name: "Banarasi Kora", tableId: 935211 },
-  { name: "Gadwal Handloom", tableId: 935213 },
-  { name: "Jamawar Silk", tableId: 935214 },
-  { name: "Cotton Saree", tableId: 935216 },
-  { name: "Linen & Kota", tableId: 935217 },
-  { name: "Art Silk", tableId: 935218 },
-  { name: "Bandhani Silk", tableId: 935212 },
+  {
+    name: "Kanjivaram Silks",
+    tableId: 948083,
+    fields: {
+      generationStatus: "field_8253052",
+      shopify: "field_8253055",
+      comment: "field_8253053",
+    },
+  },
+  {
+    name: "Pure Silk Sarees",
+    tableId: 935204,
+    fields: {
+      generationStatus: "field_8123033",
+      shopify: "field_8123036",
+      comment: "field_8123034",
+    },
+  },
+  {
+    name: "Tussar Silk Saree",
+    tableId: 948245,
+    fields: {
+      generationStatus: "field_8254631",
+      shopify: "field_8254634",
+      comment: "field_8254632",
+    },
+  },
+  {
+    name: "South Weaves - South Silk Sarees",
+    tableId: 935205,
+    fields: {
+      generationStatus: "field_8123050",
+      shopify: "field_8123053",
+      comment: "field_8123051",
+    },
+  },
+  {
+    name: "Soft Silk Sarees",
+    tableId: 935207,
+    fields: {
+      generationStatus: "field_8123084",
+      shopify: "field_8123087",
+      comment: "field_8123085",
+    },
+  },
+  {
+    name: "Patola & Orissa Silk Sarees",
+    tableId: 935208,
+    fields: {
+      generationStatus: "field_8123101",
+      shopify: "field_8123104",
+      comment: "field_8123102",
+    },
+  },
+  {
+    name: "Printed Pure Silk Sarees",
+    tableId: 935203,
+    fields: {
+      generationStatus: "field_8123016",
+      shopify: "field_8123019",
+      comment: "field_8123017",
+    },
+  },
+  {
+    name: "Cotton Silk Sarees",
+    tableId: 935215,
+    fields: {
+      generationStatus: "field_8123220",
+      shopify: "field_8123223",
+      comment: "field_8123221",
+    },
+  },
+  {
+    name: "Paithani Silk Sarees",
+    tableId: 935206,
+    fields: {
+      generationStatus: "field_8123067",
+      shopify: "field_8123070",
+      comment: "field_8123068",
+    },
+  },
+  {
+    name: "Banarasi Georgette Silk Sarees",
+    tableId: 935209,
+    fields: {
+      generationStatus: "field_8123118",
+      shopify: "field_8123121",
+      comment: "field_8123119",
+    },
+  },
+  {
+    name: "Banarasi Silk Sarees",
+    tableId: 935210,
+    fields: {
+      generationStatus: "field_8123135",
+      shopify: "field_8123138",
+      comment: "field_8123136",
+    },
+  },
+  {
+    name: "Banarasi Kora Silk Saree",
+    tableId: 935211,
+    fields: {
+      generationStatus: "field_8123152",
+      shopify: "field_8123155",
+      comment: "field_8123153",
+    },
+  },
+  {
+    name: "Gadwal Handloom",
+    tableId: 935213,
+    fields: {
+      generationStatus: "field_8123186",
+      shopify: "field_8123189",
+      comment: "field_8123187",
+    },
+  },
+  {
+    name: "Jamawar Silk Sarees",
+    tableId: 935214,
+    fields: {
+      generationStatus: "field_8123203",
+      shopify: "field_8123206",
+      comment: null,
+    },
+  },
+  {
+    name: "Cotton Saree",
+    tableId: 935216,
+    fields: {
+      generationStatus: "field_8123237",
+      shopify: "field_8123240",
+      comment: "field_8123238",
+    },
+  },
+  {
+    name: "Linen & Kota Silk Sarees",
+    tableId: 935217,
+    fields: {
+      generationStatus: "field_8123254",
+      shopify: "field_8123257",
+      comment: "field_8123255",
+    },
+  },
+  {
+    name: "Art Silk Sarees",
+    tableId: 935218,
+    fields: {
+      generationStatus: "field_8123270",
+      shopify: "field_8123274",
+      comment: "field_8123272",
+    },
+  },
+  {
+    name: "Bandhani Silk Saree",
+    tableId: 935212,
+    fields: {
+      generationStatus: "field_8123169",
+      shopify: "field_8123172",
+      comment: "field_8123170",
+    },
+  },
 ];
-
-const FIELD_IDS = {
-  shopify: "field_8616094",
-  comment: "field_8253053",
-  approvel: "field_8253065",
-};
-
-const OPTION_IDS = {
-  shopifyApproved: 6484359,
-  shopifyReject: 6484360,
-  approvelReject: 5987935,
-};
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+const fieldMapCache = new Map();
 
 function assertConfig() {
   if (!BASEROW_TOKEN) {
@@ -72,8 +206,63 @@ function getTableConfigByName(name) {
 function getSelectValue(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
-  if (typeof value === "object") return value.value || value.name || "";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "object") return value.value || value.name || String(value.id || "");
   return String(value);
+}
+
+function readField(row, fieldId, fallbackName, fieldMap = null) {
+  if (fieldId && Object.prototype.hasOwnProperty.call(row, fieldId)) {
+    return row[fieldId];
+  }
+
+  if (fallbackName && fieldMap?.byName?.has(fallbackName)) {
+    const mappedFieldId = fieldMap.byName.get(fallbackName);
+    if (Object.prototype.hasOwnProperty.call(row, mappedFieldId)) {
+      return row[mappedFieldId];
+    }
+  }
+
+  if (fallbackName && Object.prototype.hasOwnProperty.call(row, fallbackName)) {
+    return row[fallbackName];
+  }
+
+  return null;
+}
+
+async function fetchFieldMap(tableId) {
+  assertConfig();
+
+  if (fieldMapCache.has(String(tableId))) {
+    return fieldMapCache.get(String(tableId));
+  }
+
+  const response = await fetch(`${BASEROW_API_URL}/api/database/fields/table/${tableId}/`, {
+    headers: {
+      Authorization: `Token ${BASEROW_TOKEN}`,
+      Accept: "application/json",
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    const details = typeof data === "object" ? JSON.stringify(data) : String(data);
+    const error = new Error(`Baserow fields fetch failed for table ${tableId}: ${details}`);
+    error.status = response.status;
+    error.baserow = data;
+    error.errorType = data?.error || null;
+    error.tableId = tableId;
+    throw error;
+  }
+
+  const fields = Array.isArray(data) ? data : data.results || [];
+  const fieldMap = {
+    byName: new Map(fields.map((field) => [field.name, `field_${field.id}`])),
+    fields,
+  };
+  fieldMapCache.set(String(tableId), fieldMap);
+  return fieldMap;
 }
 
 function getFileUrl(field) {
@@ -89,43 +278,48 @@ function parsePrice(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function isApprovedGeneration(row) {
-  const value = row["Generation Status"];
-  return value?.value === "Approved" || value?.id === 5987929 || value === "Approved";
+function isApprovedGeneration(row, tableConfig, fieldMap = null) {
+  const status = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
+  const value = getSelectValue(status);
+  return value === "Approved" || status?.id === 5987929;
 }
 
-function normalizeProduct(row, tableConfig) {
+function normalizeProduct(row, tableConfig, fieldMap = null) {
+  const generationStatus = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
+  const shopify = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
+  const comment = readField(row, tableConfig.fields.comment, "Comment", fieldMap);
+
   return {
     id: `${tableConfig.tableId}-${row.id}`,
     rowId: row.id,
     tableId: tableConfig.tableId,
     collectionName: tableConfig.name,
-    code: row["Product Code"] || row["SKU"] || row["Product SKU"] || `ROW-${row.id}`,
-    title: row["Product Title"] || row["Title"] || "Untitled Saree",
-    category: getSelectValue(row["Category"]) || tableConfig.name,
-    price: parsePrice(row["Price (INR)"] || row["Price"] || row["Pri..."]),
-    generationStatus: getSelectValue(row["Generation Status"]),
-    approvalStatus: getSelectValue(row["Approvel"]) || getSelectValue(row["Approval"]) || "Pending Review",
-    shopify: getSelectValue(row["SHOPIFY"]) || "Pending",
-    comment: row["Comment"] || "",
-    modified: row["Last Modified"] || row["updated_on"] || row["created_on"] || "",
-    specifications: row["Specifications"] || "",
+    code: readField(row, null, "Product Code", fieldMap) || readField(row, null, "SKU", fieldMap) || readField(row, null, "Product SKU", fieldMap) || `ROW-${row.id}`,
+    title: readField(row, null, "Product Title", fieldMap) || readField(row, null, "Title", fieldMap) || "Untitled Saree",
+    category: getSelectValue(readField(row, null, "Category", fieldMap)) || tableConfig.name,
+    price: parsePrice(readField(row, null, "Price (INR)", fieldMap) || readField(row, null, "Price", fieldMap) || readField(row, null, "Pri...", fieldMap)),
+    generationStatus: getSelectValue(generationStatus),
+    approvalStatus: getSelectValue(readField(row, null, "Approvel", fieldMap)) || getSelectValue(readField(row, null, "Approval", fieldMap)) || "Pending Review",
+    shopify: getSelectValue(shopify) || "Pending",
+    comment: comment || "",
+    modified: readField(row, null, "Last Modified", fieldMap) || row.updated_on || row.created_on || "",
+    specifications: readField(row, null, "Specifications", fieldMap) || "",
     raw: {
-      generationStatus: row["Generation Status"],
-      shopify: row["SHOPIFY"],
-      approvel: row["Approvel"],
+      generationStatus,
+      shopify,
+      approvel: readField(row, null, "Approvel", fieldMap),
     },
     images: {
-      full: getFileUrl(row["Full Saree Image"]),
-      blouse: getFileUrl(row["Blouse Image"]),
-      pallu: getFileUrl(row["Pallu Image"]),
-      border: getFileUrl(row["Border Image"]),
-      front: getFileUrl(row["Generated Front View"]),
-      side: getFileUrl(row["Side View"]),
-      back: getFileUrl(row["Back View"]),
-      close: getFileUrl(row["Close Up View"]),
-      grid: getFileUrl(row["Grid View"]),
-      video: getFileUrl(row["Video"]),
+      full: getFileUrl(readField(row, null, "Full Saree Image", fieldMap)),
+      blouse: getFileUrl(readField(row, null, "Blouse Image", fieldMap)),
+      pallu: getFileUrl(readField(row, null, "Pallu Image", fieldMap)),
+      border: getFileUrl(readField(row, null, "Border Image", fieldMap)),
+      front: getFileUrl(readField(row, null, "Generated Front View", fieldMap)),
+      side: getFileUrl(readField(row, null, "Side View", fieldMap)),
+      back: getFileUrl(readField(row, null, "Back View", fieldMap)),
+      close: getFileUrl(readField(row, null, "Close Up View", fieldMap)),
+      grid: getFileUrl(readField(row, null, "Grid View", fieldMap)),
+      video: getFileUrl(readField(row, null, "Video", fieldMap)),
     },
   };
 }
@@ -172,7 +366,6 @@ async function fetchBaserowRows(tableId) {
 
   while (hasNext) {
     const params = new URLSearchParams({
-      user_field_names: "true",
       size: "100",
       page: String(page),
     });
@@ -206,13 +399,17 @@ async function fetchBaserowRows(tableId) {
 }
 
 async function fetchApprovedForTable(tableConfig) {
-  const rows = await fetchBaserowRows(tableConfig.tableId);
-  const approvedRows = rows.filter(isApprovedGeneration);
+  const [rows, fieldMap] = await Promise.all([
+    fetchBaserowRows(tableConfig.tableId),
+    fetchFieldMap(tableConfig.tableId),
+  ]);
+  const approvedRows = rows.filter((row) => isApprovedGeneration(row, tableConfig, fieldMap));
   return {
     tableConfig,
     rows,
+    fieldMap,
     approvedRows,
-    products: approvedRows.map((row) => normalizeProduct(row, tableConfig)),
+    products: approvedRows.map((row) => normalizeProduct(row, tableConfig, fieldMap)),
   };
 }
 
@@ -233,10 +430,10 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-async function patchBaserowRow(tableId, rowId, payload, userFieldNames = true) {
+async function patchBaserowRow(tableId, rowId, payload) {
   assertConfig();
 
-  const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/${rowId}/?user_field_names=${userFieldNames ? "true" : "false"}`;
+  const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/${rowId}/`;
   const response = await fetch(url, {
     method: "PATCH",
     headers: {
@@ -265,19 +462,22 @@ async function patchBaserowRow(tableId, rowId, payload, userFieldNames = true) {
   return data;
 }
 
-async function updateBaserowRow(tableId, rowId, userFieldPayload, fieldIdPayload) {
-  try {
-    return await patchBaserowRow(tableId, rowId, userFieldPayload, true);
-  } catch (firstError) {
-    if (!fieldIdPayload) throw firstError;
-    console.warn(`Baserow string select update failed for table ${tableId}, row ${rowId}; retrying with field IDs.`);
-    try {
-      return await patchBaserowRow(tableId, rowId, fieldIdPayload, false);
-    } catch (secondError) {
-      secondError.message = `${secondError.message}. Original string-field update error: ${firstError.message}`;
-      throw secondError;
-    }
+function buildApprovePayload(tableConfig) {
+  return {
+    [tableConfig.fields.shopify]: "Approved",
+  };
+}
+
+function buildRejectPayload(tableConfig, commentText) {
+  const payload = {
+    [tableConfig.fields.shopify]: "Reject",
+  };
+
+  if (tableConfig.fields.comment) {
+    payload[tableConfig.fields.comment] = commentText;
   }
+
+  return payload;
 }
 
 function updatePermissionResponse(res, error) {
@@ -290,9 +490,8 @@ function updatePermissionResponse(res, error) {
     fix: [
       "Open Baserow database token settings.",
       `Grant update access to table ${error.tableId}.`,
-      "Grant update access to SHOPIFY.",
-      "Grant update access to Approvel.",
-      "Grant update access to Comment.",
+      "Grant update access to the table-specific SHOPIFY field.",
+      "Grant update access to the table-specific Comment field when present.",
       "Restart Node server.",
     ],
   });
@@ -432,17 +631,13 @@ app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
-    const updatedRow = await updateBaserowRow(
-      tableId,
-      rowId,
-      { SHOPIFY: "Approved" },
-      { [FIELD_IDS.shopify]: OPTION_IDS.shopifyApproved }
-    );
+    const updatedRow = await patchBaserowRow(tableId, rowId, buildApprovePayload(tableConfig));
+    const fieldMap = await fetchFieldMap(tableId);
 
     res.json({
       success: true,
       message: "Product approved for Shopify.",
-      row: normalizeProduct(updatedRow, tableConfig),
+      row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
   } catch (error) {
     console.error(error);
@@ -459,21 +654,13 @@ app.patch("/api/products/:tableId/:rowId/request-changes", async (req, res) => {
 
     const { changeType = "Other", comment = "" } = req.body || {};
     const finalComment = `Change Type: ${changeType}\n\n${comment || "Changes requested from review portal."}`;
-    const updatedRow = await updateBaserowRow(
-      tableId,
-      rowId,
-      { SHOPIFY: "Reject", Approvel: "Reject", Comment: finalComment },
-      {
-        [FIELD_IDS.shopify]: OPTION_IDS.shopifyReject,
-        [FIELD_IDS.approvel]: OPTION_IDS.approvelReject,
-        [FIELD_IDS.comment]: finalComment,
-      }
-    );
+    const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, finalComment));
+    const fieldMap = await fetchFieldMap(tableId);
 
     res.json({
       success: true,
       message: "Request changes saved.",
-      row: normalizeProduct(updatedRow, tableConfig),
+      row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
   } catch (error) {
     console.error(error);
@@ -489,21 +676,13 @@ app.patch("/api/products/:tableId/:rowId/reject", async (req, res) => {
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
     const { comment = "Rejected from review portal" } = req.body || {};
-    const updatedRow = await updateBaserowRow(
-      tableId,
-      rowId,
-      { SHOPIFY: "Reject", Approvel: "Reject", Comment: comment },
-      {
-        [FIELD_IDS.shopify]: OPTION_IDS.shopifyReject,
-        [FIELD_IDS.approvel]: OPTION_IDS.approvelReject,
-        [FIELD_IDS.comment]: comment,
-      }
-    );
+    const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, comment));
+    const fieldMap = await fetchFieldMap(tableId);
 
     res.json({
       success: true,
       message: "Product rejected.",
-      row: normalizeProduct(updatedRow, tableConfig),
+      row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
   } catch (error) {
     console.error(error);
@@ -546,6 +725,9 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           tableId: tableConfig.tableId,
           readAccess: true,
           approvedRows: approvedRows.length,
+          shopifyField: tableConfig.fields.shopify,
+          commentField: tableConfig.fields.comment,
+          generationStatusField: tableConfig.fields.generationStatus,
           error: null,
         });
       } catch (error) {
@@ -554,6 +736,9 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           tableId: tableConfig.tableId,
           readAccess: false,
           approvedRows: 0,
+          shopifyField: tableConfig.fields.shopify,
+          commentField: tableConfig.fields.comment,
+          generationStatusField: tableConfig.fields.generationStatus,
           error: error.baserow || error.message,
         });
       }
