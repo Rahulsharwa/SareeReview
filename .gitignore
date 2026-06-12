@@ -1,0 +1,5 @@
+.env
+.mcp.json
+mcp_config.local.json
+node_modules
+.DS_Store

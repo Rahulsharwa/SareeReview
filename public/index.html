@@ -1,0 +1,1930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Janardhana Silk House — Saree Review Portal</title>
+  <!-- Live Baserow version: frontend calls backend /api/products. Token stays in backend .env only. -->
+  <style>
+    :root {
+      --bg: #fbf7ef;
+      --card: #fffdf8;
+      --soft: #f6ead9;
+      --soft-2: #fff7ea;
+      --maroon: #7a0f1d;
+      --maroon-dark: #5e0713;
+      --gold: #b8892d;
+      --green: #006b3f;
+      --red: #b42318;
+      --text: #2b2118;
+      --muted: #7a6a58;
+      --border: #e6d7c2;
+      --shadow: 0 18px 45px rgba(85, 55, 25, 0.10);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #fffaf1 0, var(--bg) 45%, #f7efe4 100%);
+      color: var(--text);
+    }
+
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    .app-shell {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .top-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+      padding: 28px;
+      background: rgba(255, 253, 248, 0.94);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      position: relative;
+      top: auto;
+      z-index: 5;
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .logo-mark {
+      width: 72px;
+      height: 72px;
+      border: 1px solid var(--gold);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--maroon);
+      background: linear-gradient(145deg, #fff9ed, #f3e3c8);
+      font-family: Georgia, serif;
+      font-size: 23px;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--maroon);
+      font-size: clamp(28px, 3vw, 46px);
+      letter-spacing: -0.03em;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      border: 1px solid #e3c7ae;
+      background: #fff2e7;
+      color: var(--maroon);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .live-copy {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      text-align: right;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 11px 18px;
+      border-radius: 999px;
+      border: 1px solid #a4d5bd;
+      background: #e8f7ef;
+      color: #065f3d;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      background: #35b36c;
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(53,179,108,.12);
+    }
+
+    .icon-btn {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: #fffaf2;
+      color: var(--maroon);
+      font-size: 20px;
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+
+    .icon-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(80, 45, 20, .12); }
+
+    .main-menu-btn {
+      height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fffaf2;
+      color: var(--maroon);
+      font-weight: 950;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 8px 18px rgba(80, 45, 20, .08);
+      transition: transform .2s ease, box-shadow .2s ease;
+      white-space: nowrap;
+    }
+
+    .main-menu-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 24px rgba(80, 45, 20, .12);
+    }
+
+    .detail-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px;
+      margin-top: 24px;
+      border-radius: 22px;
+      border: 1px solid var(--border);
+      background: rgba(255, 253, 248, 0.96);
+      box-shadow: 0 14px 32px rgba(80, 45, 20, .08);
+    }
+
+    .detail-nav-title {
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-weight: 950;
+    }
+
+    .detail-nav-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+
+    .avatar {
+      width: 52px;
+      height: 52px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #f7e7d2;
+      border: 1px solid #d8bb93;
+      color: var(--maroon);
+      font-weight: 900;
+    }
+
+    .section-card {
+      background: rgba(255, 253, 248, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      margin-top: 24px;
+      overflow: hidden;
+    }
+
+    .section-pad { padding: 24px; }
+
+    .collection-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .collection-count {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-transform: none;
+      letter-spacing: .02em;
+      font-size: 15px;
+      color: #8a5e36;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+
+    .tab {
+      min-width: max-content;
+      padding: 16px 22px;
+      border: 1px solid var(--border);
+      background: #fffaf2;
+      border-radius: 15px;
+      color: var(--text);
+      font-weight: 850;
+      transition: all .2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .tab .count {
+      min-width: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      background: #f2dfc6;
+      color: var(--maroon);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .tab.active {
+      background: var(--maroon);
+      color: white;
+      border-color: var(--gold);
+      box-shadow: 0 8px 18px rgba(122, 15, 29, .24);
+    }
+
+    .tab.active .count { background: rgba(255,255,255,.18); color: white; }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.3fr) .9fr .8fr .8fr auto;
+      gap: 14px;
+      align-items: center;
+      padding: 26px;
+      background: rgba(255,253,248,.96);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      margin-top: 24px;
+      box-shadow: 0 14px 32px rgba(80, 45, 20, .08);
+    }
+
+    .field {
+      height: 58px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fffaf2;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      min-width: 0;
+    }
+
+    .field input, .field select {
+      border: 0;
+      outline: 0;
+      width: 100%;
+      background: transparent;
+      color: var(--text);
+      min-width: 0;
+    }
+
+    .field-label {
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .view-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .toggle-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 13px;
+      border: 1px solid var(--border);
+      background: #fffaf2;
+      color: var(--maroon);
+      font-size: 20px;
+    }
+
+    .toggle-btn.active { background: var(--maroon); color: #fff; border-color: var(--gold); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, .85fr);
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .product-summary {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 130px 1fr 1fr;
+      gap: 24px;
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: 0 14px 32px rgba(80, 45, 20, .08);
+    }
+
+    .summary-img {
+      height: 130px;
+      border-radius: 15px;
+      overflow: hidden;
+      background: #f4eadc;
+      border: 1px solid var(--border);
+      position: relative;
+    }
+
+    .meta-table {
+      display: grid;
+      gap: 12px;
+      align-content: center;
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 12px;
+      font-size: 14px;
+      min-width: 0;
+    }
+
+    .meta-row span:first-child { color: var(--muted); font-weight: 800; }
+    .meta-row strong { color: var(--text); overflow-wrap: anywhere; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: max-content;
+      max-width: 100%;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      color: #8a5200;
+      background: #fff1c7;
+      border: 1px solid #e8cf8a;
+    }
+
+    .badge.green { background: #e8f7ef; color: #065f3d; border-color: #a4d5bd; }
+    .badge.red { background: #fff0ee; color: var(--red); border-color: #efb6ad; }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 18px;
+      box-shadow: 0 14px 32px rgba(80, 45, 20, .08);
+      min-width: 0;
+    }
+
+    .panel-title {
+      margin: 0 0 16px;
+      font-size: 17px;
+      font-weight: 950;
+      color: var(--text);
+    }
+
+    .mini-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .mini-tab {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 13px;
+      background: #fff7ea;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .mini-tab.active { background: var(--maroon); color: white; border-color: var(--gold); }
+
+    .hero-preview {
+      height: 430px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: #f8efe1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .zoom-wrap {
+      position: relative;
+      overflow: hidden;
+      background: #f8efe1;
+      isolation: isolate;
+    }
+
+    .fit-img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center;
+      background: #fffaf2;
+    }
+
+    .product-card .fit-img { object-fit: contain; }
+
+    .zoom-actions {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      display: flex;
+      gap: 8px;
+      z-index: 3;
+      max-width: calc(100% - 20px);
+      pointer-events: auto;
+    }
+
+    .zoom-btn {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255,253,248,.92);
+      color: var(--maroon);
+      font-size: 18px;
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+    }
+
+    .zoom-btn:hover {
+      background: var(--maroon);
+      color: #fff;
+      border-color: var(--gold);
+    }
+
+    .mini-thumb .zoom-actions,
+    .thumb-img .zoom-actions {
+      right: 4px;
+      top: 4px;
+    }
+
+    .mini-thumb .zoom-btn,
+    .thumb-img .zoom-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      font-size: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,.10);
+    }
+
+    .zoom-wrap,
+    .summary-img,
+    .card-img,
+    .hero-preview,
+    .ref-img,
+    .compare-img,
+    .phone-hero,
+    .mini-thumb,
+    .thumb-img {
+      position: relative;
+      overflow: hidden;
+    }
+
+
+    .zoom-lens {
+      display: none !important;
+    }
+
+    .zoom-lens {
+      display: none !important;
+    }
+
+    .image-label {
+      position: absolute;
+      top: 13px;
+      left: 13px;
+      background: rgba(122,15,29,.88);
+      color: white;
+      padding: 8px 11px;
+      border-radius: 9px;
+      font-weight: 850;
+      font-size: 13px;
+      z-index: 2;
+    }
+
+    .thumb-strip {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .thumb {
+      border: 1px solid var(--border);
+      background: #fff7ea;
+      border-radius: 13px;
+      padding: 6px;
+      min-width: 0;
+    }
+
+    .thumb.active { border-color: var(--maroon); box-shadow: 0 0 0 2px rgba(122,15,29,.12); }
+
+    .thumb .thumb-img {
+      height: 72px;
+      border-radius: 9px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .thumb small {
+      display: block;
+      text-align: center;
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .reference-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .ref-card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: #fffaf2;
+      overflow: hidden;
+      padding: 10px;
+      transition: border-color .2s ease, transform .2s ease;
+      min-width: 0;
+    }
+
+    .ref-card:hover { border-color: var(--gold); transform: translateY(-1px); }
+
+    .ref-img {
+      height: 185px;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      background: #f8efe1;
+    }
+
+    .ref-label {
+      margin: 9px 0 2px;
+      text-align: center;
+      font-weight: 850;
+      font-size: 13px;
+    }
+
+    .action-bar {
+      display: grid;
+      grid-template-columns: minmax(210px, 1fr) 140px 170px 120px 140px;
+      gap: 14px;
+      align-items: center;
+      padding: 18px;
+      margin-top: 24px;
+      background: rgba(255, 253, 248, 0.96);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      position: sticky;
+      bottom: 18px;
+      z-index: 12;
+      backdrop-filter: blur(14px);
+    }
+
+    .note-input {
+      height: 50px;
+      border-radius: 13px;
+      border: 1px solid var(--border);
+      padding: 0 14px;
+      background: white;
+      outline: none;
+    }
+
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 12px;
+      height: 50px;
+      font-weight: 950;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 8px 18px rgba(80, 45, 20, .08);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(80, 45, 20, .12); }
+    .btn-red { background: white; color: var(--red); border-color: #e7a8a0; }
+    .btn-gold { background: linear-gradient(135deg, #b57906, #c59633); color: white; }
+    .btn-neutral { background: #f4f2ee; color: var(--text); border-color: #cfc4b5; }
+    .btn-green { background: var(--green); color: white; }
+    .btn-maroon { background: var(--maroon); color: white; }
+
+    .grid-view {
+      display: none;
+      margin-top: 24px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .grid-view.active { display: grid; }
+    .detail-view.hidden { display: none; }
+
+    .product-card {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 16px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: var(--card);
+      box-shadow: 0 14px 32px rgba(80, 45, 20, .08);
+      min-width: 0;
+    }
+
+    .card-img {
+      height: 245px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      position: relative;
+      background: #f8efe1;
+    }
+
+    .card-content {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .code-pill {
+      width: max-content;
+      max-width: 100%;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--maroon);
+      color: white;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 900;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.35;
+      color: var(--text);
+    }
+
+    .card-muted { color: var(--muted); font-size: 13px; font-weight: 700; }
+    .price { font-size: 18px; font-weight: 950; }
+
+    .mini-thumbs {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: auto;
+    }
+
+    .mini-thumb {
+      height: 54px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      background: #fff7ea;
+      position: relative;
+    }
+
+    .card-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .compare-view {
+      display: none;
+      padding: 26px;
+      margin-top: 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .compare-view.active { display: block; }
+
+    .compare-title {
+      text-align: center;
+      font-family: Georgia, serif;
+      color: var(--maroon-dark);
+      margin: 0 0 22px;
+      font-size: 25px;
+    }
+
+    .compare-controls {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .vs {
+      width: 58px;
+      height: 58px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--maroon);
+      color: white;
+      font-weight: 950;
+      border: 3px solid #f3d5a4;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .compare-img {
+      height: 390px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: #fff7ea;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .mobile-preview {
+      display: none;
+      margin-top: 24px;
+      grid-template-columns: repeat(2, minmax(280px, 420px));
+      gap: 24px;
+      align-items: start;
+      justify-content: center;
+    }
+
+    .phone {
+      width: min(100%, 390px);
+      border: 10px solid #151515;
+      border-radius: 42px;
+      padding: 18px 14px;
+      background: var(--bg);
+      box-shadow: 0 20px 55px rgba(0,0,0,.15);
+      min-height: 720px;
+      position: relative;
+    }
+
+    .phone::before {
+      content: "";
+      width: 108px;
+      height: 18px;
+      background: #111;
+      border-radius: 0 0 14px 14px;
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .phone-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-top: 8px;
+    }
+
+    .phone-title { text-align: center; font-family: Georgia, serif; color: var(--maroon); font-weight: 900; font-size: 16px; }
+    .phone-tabs { display:flex; gap:8px; overflow:auto; margin:12px 0; }
+    .phone-tabs .tab { padding: 10px 12px; font-size: 12px; }
+    .phone-card { background: var(--card); border:1px solid var(--border); border-radius:18px; padding:12px; margin-bottom:12px; }
+    .phone-hero { height: 260px; border-radius: 14px; overflow:hidden; position:relative; border:1px solid var(--border); }
+    .phone-ref { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .phone-ref .ref-img { height: 150px; }
+    .phone-actions { position: sticky; bottom: 12px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+
+    .modal-backdrop,
+    .lightbox-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(30, 20, 12, .64);
+      backdrop-filter: blur(7px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-backdrop.active,
+    .lightbox-backdrop.active { display: flex; }
+
+    .modal {
+      width: min(720px, 96vw);
+      background: var(--card);
+      border-radius: 22px;
+      border: 1px solid var(--border);
+      box-shadow: 0 30px 90px rgba(0,0,0,.30);
+      padding: 24px;
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .modal-head h3 { margin: 0; color: var(--text); font-size: 23px; }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: .85fr 1.15fr;
+      gap: 16px;
+    }
+
+    .modal label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--text);
+      font-weight: 850;
+      font-size: 13px;
+    }
+
+    .modal select, .modal textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: #fffaf2;
+      padding: 13px;
+      outline: none;
+    }
+
+    .modal textarea { min-height: 170px; resize: vertical; }
+    .char-count { text-align: right; color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+    .toast-stack {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      display: grid;
+      gap: 12px;
+      z-index: 140;
+    }
+
+    .toast {
+      min-width: 310px;
+      border: 1px solid #b9dec7;
+      background: #ffffff;
+      color: #074329;
+      box-shadow: 0 18px 55px rgba(0,0,0,.15);
+      border-radius: 16px;
+      padding: 16px 18px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-weight: 850;
+      animation: slideIn .25s ease both;
+    }
+
+    @keyframes slideIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    .toast .tick {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #e8f7ef;
+      color: var(--green);
+      flex: 0 0 auto;
+    }
+
+    .lightbox {
+      width: min(1200px, 96vw);
+      height: min(820px, 92vh);
+      background: #16110d;
+      border-radius: 22px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.16);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .lightbox-head {
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      color: white;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+    }
+
+    .lightbox-tools { display:flex; gap:10px; }
+    .lightbox-tools button { background: rgba(255,255,255,.12); color:white; border:1px solid rgba(255,255,255,.18); border-radius:10px; height:38px; padding:0 12px; }
+
+    .lightbox-stage {
+      flex: 1;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      cursor: grab;
+      background: radial-gradient(circle, #2b2118, #090806);
+      touch-action: none;
+      user-select: none;
+    }
+
+    .lightbox-stage.dragging {
+      cursor: grabbing;
+    }
+
+    .lightbox-stage img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      transform-origin: center center;
+      transition: transform .06s linear;
+      user-select: none;
+      pointer-events: none;
+      will-change: transform;
+    }
+
+    .empty-img {
+      height: 100%;
+      width: 100%;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-weight: 850;
+      background: repeating-linear-gradient(45deg, #fff9ef, #fff9ef 10px, #f5eadb 10px, #f5eadb 20px);
+    }
+
+    @media (max-width: 1180px) {
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .view-toggle { justify-content: flex-start; }
+      .layout { grid-template-columns: 1fr; }
+      .product-summary { grid-template-columns: 120px 1fr; }
+      .product-summary .meta-table:last-child { grid-column: 1 / -1; }
+      .grid-view.active { grid-template-columns: 1fr; }
+      .mobile-preview { display: grid; }
+    }
+
+    @media (max-width: 760px) {
+      .app-shell { padding: 14px; }
+      .top-header { position: relative; top: auto; flex-direction: column; align-items: stretch; padding: 18px; }
+      .header-actions { justify-content: flex-start; }
+      .logo-mark { width: 56px; height: 56px; font-size: 18px; }
+      .toolbar { grid-template-columns: 1fr; padding: 16px; }
+      .detail-nav { flex-direction: column; align-items: stretch; }
+      .detail-nav-actions { justify-content: stretch; }
+      .detail-nav-actions .btn { flex: 1; }
+      .main-menu-btn { width: 100%; }
+
+      .product-summary { grid-template-columns: 1fr; }
+      .summary-img { height: 220px; }
+      .reference-grid, .compare-grid, .modal-grid { grid-template-columns: 1fr; }
+      .hero-preview, .compare-img { height: 330px; }
+      .thumb-strip { grid-template-columns: repeat(3, 1fr); }
+      .action-bar { grid-template-columns: 1fr 1fr; }
+      .note-input { grid-column: 1 / -1; }
+      .product-card { grid-template-columns: 1fr; }
+      .card-img { height: 320px; }
+      .compare-controls { grid-template-columns: 1fr; }
+      .vs { margin: 0 auto; }
+      .mobile-preview { grid-template-columns: 1fr; }
+      .toast-stack { left: 14px; right: 14px; }
+      .toast { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-header">
+      <div class="brand">
+        <div class="logo-mark">JSH</div>
+        <div>
+          <div class="brand-row">
+            <h1>Janardhana Silk House</h1>
+            <span class="tag">Saree Review Portal</span>
+          </div>
+          <p class="subtitle">Review, compare generated sarees and approve live listings for Shopify</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="main-menu-btn" id="backMainBtn" type="button">← Back to Main Menu</button>
+        <div class="live-copy">◷ Live Sync · Auto 15s<br><span id="updatedAt">Updated: --:--:--</span></div>
+        <span class="status-pill"><span class="dot"></span>Baserow Connected</span>
+        <button class="icon-btn" id="refreshBtn" title="Refresh data">↻</button>
+        <div class="avatar">AM</div>
+      </div>
+    </header>
+
+    <section class="section-card section-pad">
+      <div class="collection-head">
+        <span>Collections Category Filter</span>
+        <span class="collection-count"><span id="totalCount">0</span> saree listings available</span>
+      </div>
+      <div class="tabs" id="categoryTabs"></div>
+    </section>
+
+    <section class="toolbar">
+      <div class="field"><span>⌕</span><input id="searchInput" type="search" placeholder="Search by Product Code or Product Title" /></div>
+      <div class="field"><span class="field-label">Category:</span><select id="categorySelect"></select></div>
+      <div class="field"><span class="field-label">Status:</span><select id="statusSelect"><option>All Statuses</option><option>Approved</option><option>Pending Review</option><option>Rejected</option></select></div>
+      <div class="field"><span class="field-label">Sort:</span><select id="sortSelect"><option>Latest Updated</option><option>Price High to Low</option><option>Price Low to High</option><option>Title A-Z</option></select></div>
+      <div class="view-toggle">
+        <button class="toggle-btn active" id="gridBtn" title="Grid view">▦</button>
+        <button class="toggle-btn" id="detailBtn" title="Detail view">☰</button>
+      </div>
+    </section>
+
+    <main>
+      <section class="grid-view active" id="gridView"></section>
+
+      <section class="detail-view hidden" id="detailView">
+        <div class="detail-nav">
+          <div class="detail-nav-title">Detailed Product Review</div>
+          <div class="detail-nav-actions">
+            <button class="btn btn-neutral" type="button" onclick="backToMainMenu()">← Back to Main Menu</button>
+            <button class="btn btn-maroon" type="button" onclick="jumpToNextProduct()">Next Product →</button>
+          </div>
+        </div>
+        <div class="layout">
+          <div class="product-summary" id="productSummary"></div>
+          <div class="panel">
+            <h2 class="panel-title">Generated Output</h2>
+            <div class="mini-tabs" id="generatedTabs"></div>
+            <div class="hero-preview zoom-wrap" id="heroPreview"></div>
+            <div class="thumb-strip" id="thumbStrip"></div>
+          </div>
+          <div class="panel">
+            <h2 class="panel-title">Reference Images</h2>
+            <div class="reference-grid" id="referenceGrid"></div>
+          </div>
+        </div>
+
+        <section class="compare-view active" id="compareView">
+          <h2 class="compare-title">Compare Reference vs Generated Output</h2>
+          <div class="compare-controls">
+            <div class="field"><span class="field-label">Reference Type</span><select id="referenceSelect"></select></div>
+            <div class="vs">VS</div>
+            <div class="field"><span class="field-label">Generated Output</span><select id="generatedSelect"></select></div>
+          </div>
+          <div class="compare-grid">
+            <div>
+              <h3 class="panel-title" id="compareRefTitle">Reference</h3>
+              <div class="compare-img zoom-wrap" id="compareRef"></div>
+            </div>
+            <div>
+              <h3 class="panel-title" id="compareGenTitle">Generated</h3>
+              <div class="compare-img zoom-wrap" id="compareGen"></div>
+            </div>
+          </div>
+          <div class="card-actions" style="margin-top:18px; grid-template-columns: 1fr 1fr 1fr; max-width:650px; margin-left:auto; margin-right:auto;">
+            <button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button>
+            <button class="btn btn-green" onclick="approveProduct()">Approve</button>
+            <button class="btn btn-neutral" onclick="jumpToNextProduct()">Skip / Next</button>
+          </div>
+        </section>
+
+        <div class="action-bar">
+          <input id="approvalNote" class="note-input" placeholder="Add approval note..." />
+          <button class="btn btn-red" onclick="rejectProduct()">Reject</button>
+          <button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button>
+          <button class="btn btn-neutral" onclick="jumpToNextProduct()">Skip / Next</button>
+          <button class="btn btn-green" onclick="approveProduct()">Approve</button>
+        </div>
+      </section>
+
+      <section class="mobile-preview section-card section-pad" id="mobilePreview"></section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="requestModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Request Changes</h3>
+        <button class="icon-btn" onclick="closeRequestModal()">×</button>
+      </div>
+      <div class="modal-grid">
+        <div>
+          <label for="changeType">Change Type *</label>
+          <select id="changeType" size="10">
+            <option>Front view issue</option>
+            <option>Side view issue</option>
+            <option>Back view issue</option>
+            <option>Close-up view issue</option>
+            <option>Grid view issue</option>
+            <option>Video issue</option>
+            <option>Color mismatch</option>
+            <option>Border mismatch</option>
+            <option>Pallu mismatch</option>
+            <option>Blouse mismatch</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div>
+          <label for="changeComment">Comments *</label>
+          <textarea id="changeComment" maxlength="1000" placeholder="Please provide details about the changes required..."></textarea>
+          <div class="char-count"><span id="charCount">0</span>/1000 characters</div>
+          <button class="btn btn-maroon" style="margin-top:18px; width:150px; float:right;" onclick="submitChanges()">Submit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lightbox-backdrop" id="lightbox">
+    <div class="lightbox">
+      <div class="lightbox-head">
+        <strong id="lightboxTitle">Image preview</strong>
+        <div class="lightbox-tools">
+          <button onclick="setLightboxZoom(ZOOM_STEP)">Zoom +</button>
+          <button onclick="setLightboxZoom(-ZOOM_STEP)">Zoom -</button>
+          <button onclick="resetLightbox()">Reset</button>
+          <button onclick="closeLightbox()">Close</button>
+        </div>
+      </div>
+      <div class="lightbox-stage" id="lightboxStage">
+        <img id="lightboxImg" alt="Zoomed product" />
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toastStack"></div>
+
+  <script>
+    // Live data only. The Baserow token belongs in backend .env, never in this file.
+
+    const categories = [
+      'All Collections',
+      'Kanjivaram Silks',
+      'Pure Silk Sarees',
+      'Tussar Silk Saree',
+      'South Weaves – South Silk Sarees',
+      'Soft Silk Sarees',
+      'Patola & Orissa Silk Sarees',
+      'Printed Pure Silk Sarees',
+      'Cotton Silk Sarees',
+      'Paithani Silk Sarees',
+      'Banarasi Georgette Silk Sarees',
+      'Banarasi Silk Sarees',
+      'Banarasi Kora Silk Saree',
+      'Gadwal Handloom',
+      'Jamawar Silk Sarees',
+      'Cotton Saree',
+      'Linen & Kota Silk Sarees',
+      'Art Silk Sarees',
+      'Bandhani Silk Saree'
+    ];
+
+    let products = [];
+    let isFetchingProducts = false;
+
+    async function fetchProductsFromAPI(options = {}) {
+      if (isFetchingProducts) return;
+      isFetchingProducts = true;
+
+      try {
+        const params = new URLSearchParams();
+
+        if (state?.selectedCategory && state.selectedCategory !== 'All Collections') {
+          params.set('category', state.selectedCategory);
+        }
+
+        const q = document.getElementById('searchInput')?.value?.trim();
+        if (q) params.set('search', q);
+
+        const status = document.getElementById('statusSelect')?.value;
+        if (status && status !== 'All Statuses') params.set('status', status);
+
+        const sort = document.getElementById('sortSelect')?.value;
+        if (sort) params.set('sort', sort);
+
+        const response = await fetch(`/api/products?${params.toString()}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          // If the backend returned a structured error with fix steps, pass it through
+          if (data && !data.success && (data.fix || data.error)) {
+            renderErrorPanel(data);
+            isFetchingProducts = false;
+            return;
+          }
+          throw new Error(data.error || 'Unable to fetch Baserow products');
+        }
+
+        products = Array.isArray(data.products) ? data.products : [];
+
+        if (products.length && !products.find(p => p.id === state.selectedProductId)) {
+          state.selectedProductId = products[0].id;
+        }
+
+        renderAll(false);
+
+        if (options.showToast) {
+          showToast(`Live Baserow data refreshed. ${products.length} products loaded.`);
+        }
+      } catch (error) {
+        console.error('Baserow live fetch failed:', error);
+        products = [];
+        renderErrorPanel({
+          error: error.message || 'Unable to connect with Baserow.',
+          fix: ['Check the backend .env REST token', 'Restart the backend server', 'Open /api/baserow/diagnose for details'],
+          diagnoseUrl: '/api/baserow/diagnose'
+        });
+      } finally {
+        isFetchingProducts = false;
+      }
+    }
+
+    function renderErrorPanel(errData) {
+      products = [];
+      const fixSteps = Array.isArray(errData.fix)
+        ? errData.fix.map((s, i) => `<li style="margin:6px 0;">${i + 1}. ${s}</li>`).join('')
+        : '';
+      const diagnoseLink = errData.diagnoseUrl
+        ? `<p style="margin-top:14px;"><a href="${errData.diagnoseUrl}" target="_blank" style="color:var(--maroon);font-weight:800;">&#9658; Open Diagnose Endpoint</a></p>`
+        : '';
+      document.getElementById('gridView').innerHTML = `
+        <div style="grid-column:1/-1;">
+          <div style="background:#fff8f8;border:1.5px solid #e8b0a8;border-radius:20px;padding:34px 36px;max-width:680px;margin:32px auto;box-shadow:0 14px 32px rgba(180,35,24,.08);">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+              <span style="font-size:34px;">&#9888;&#65039;</span>
+              <h2 style="margin:0;color:#b42318;font-family:Georgia,serif;font-size:22px;">Baserow Connection Error</h2>
+            </div>
+            <p style="color:#7a0f1d;font-weight:800;font-size:15px;margin:0 0 12px;">${errData.error || 'Unknown error'}</p>
+            ${fixSteps ? `<p style="font-weight:900;color:#2b2118;margin:14px 0 6px;">How to fix:</p><ol style="margin:0;padding-left:18px;color:#4a3520;font-size:14px;line-height:1.7;">${fixSteps}</ol>` : ''}
+            ${diagnoseLink}
+            <button onclick="fetchProductsFromAPI({ showToast: true })" style="margin-top:22px;padding:12px 28px;background:var(--maroon);color:#fff;border:none;border-radius:12px;font-weight:900;cursor:pointer;font-size:14px;">&#8635; Retry Connection</button>
+          </div>
+        </div>`;
+      document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    }
+
+    let state = {
+      selectedCategory: 'All Collections',
+      view: 'grid',
+      selectedProductId: null,
+      selectedGenerated: 'Front View',
+      selectedReference: 'Full Saree'
+    };
+
+    const imageMap = {
+      'Front View': 'front',
+      'Side View': 'side',
+      'Back View': 'back',
+      'Close-up View': 'close',
+      'Grid View': 'grid',
+      'Video': 'video'
+    };
+
+    const refMap = {
+      'Full Saree': 'full',
+      'Blouse': 'blouse',
+      'Pallu': 'pallu',
+      'Border': 'border'
+    };
+
+    function formatPrice(value) {
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+    }
+
+    function currentProduct() {
+      return products.find(p => p.id === state.selectedProductId) || products[0] || null;
+    }
+
+    function filteredProducts() {
+      const q = document.getElementById('searchInput')?.value?.toLowerCase() || '';
+      const cat = state.selectedCategory;
+      let list = Array.isArray(products) ? [...products] : [];
+
+      if (cat !== 'All Collections') {
+        list = list.filter(p => String(p.category || '').toLowerCase().includes(cat.toLowerCase()));
+      }
+
+      if (q) {
+        list = list.filter(p =>
+          String(p.code || '').toLowerCase().includes(q) ||
+          String(p.title || '').toLowerCase().includes(q)
+        );
+      }
+
+      const status = document.getElementById('statusSelect')?.value || 'All Statuses';
+      if (status !== 'All Statuses') {
+        list = list.filter(p =>
+          p.generationStatus === status ||
+          p.approvalStatus === status ||
+          p.shopify === status
+        );
+      }
+
+      const sort = document.getElementById('sortSelect')?.value || 'Latest Updated';
+      if (sort === 'Price High to Low') list.sort((a,b) => Number(b.price || 0) - Number(a.price || 0));
+      if (sort === 'Price Low to High') list.sort((a,b) => Number(a.price || 0) - Number(b.price || 0));
+      if (sort === 'Title A-Z') list.sort((a,b) => String(a.title || '').localeCompare(String(b.title || '')));
+      return list;
+    }
+
+    function makeZoomable(src, label, className = 'fit-img') {
+      if (!src) return `<div class="empty-img">No image found</div>`;
+
+      const safeSrc = String(src).replace(/'/g, "%27");
+      const safeLabel = String(label || 'Image preview').replace(/'/g, "\\'");
+
+      return `
+        <img src="${src}" alt="${label}" class="${className}" loading="lazy" />
+        <div class="zoom-actions">
+          <button class="zoom-btn" onclick="event.stopPropagation(); openLightbox('${safeSrc}', '${safeLabel}')" title="Open resize / zoom preview">⛶</button>
+        </div>
+      `;
+    }
+
+    function makeMedia(src, label, type = 'image') {
+      if (!src) return `<div class="empty-img">No media found</div>`;
+      if (type === 'video') {
+        return `<video src="${src}" class="fit-img" controls preload="metadata"></video>`;
+      }
+      return makeZoomable(src, label);
+    }
+
+    function wireMagnifiers() {
+      // Magnifier lens removed. Resize/zoom modal remains active through the in-image ⛶ button.
+    }
+
+    function renderCategories() {
+      const tabs = document.getElementById('categoryTabs');
+      const sel = document.getElementById('categorySelect');
+      tabs.innerHTML = '';
+      sel.innerHTML = '';
+      categories.forEach(cat => {
+      const count = cat === 'All Collections' ? products.length : products.filter(p => String(p.category || '').toLowerCase().includes(cat.toLowerCase())).length;
+        tabs.insertAdjacentHTML('beforeend', `<button class="tab ${state.selectedCategory === cat ? 'active' : ''}" onclick="selectCategory('${cat.replace(/'/g, "\\'")}')">${cat}<span class="count">${count}</span></button>`);
+        sel.insertAdjacentHTML('beforeend', `<option ${state.selectedCategory === cat ? 'selected' : ''}>${cat}</option>`);
+      });
+      document.getElementById('totalCount').textContent = filteredProducts().length;
+    }
+
+    function selectCategory(cat) {
+      state.selectedCategory = cat;
+      state.selectedProductId = null;
+      fetchProductsFromAPI();
+    }
+
+    function renderGrid() {
+      const grid = document.getElementById('gridView');
+      const list = filteredProducts();
+      grid.innerHTML = list.map(p => {
+        const keys = ['front','side','back','close','grid'];
+        return `
+          <article class="product-card">
+            <div class="card-img zoom-wrap">${makeZoomable(p.images.grid || p.images.front || p.images.full, p.title)}</div>
+            <div class="card-content">
+              <span class="code-pill">${p.code}</span>
+              <h3 class="card-title">${p.title}</h3>
+              <div class="card-muted">${p.category}</div>
+              <div class="price">${formatPrice(p.price)}</div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <span class="badge">${p.generationStatus}</span>
+                <span class="badge ${p.shopify === 'Approved' ? 'green' : ''}">Shopify: ${p.shopify}</span>
+              </div>
+              <div class="mini-thumbs">
+                ${keys.map(k => `<div class="mini-thumb zoom-wrap">${makeZoomable(p.images[k], k.toUpperCase())}</div>`).join('')}
+                ${p.images.video ? `<div class="mini-thumb zoom-wrap">${makeZoomable(p.images.video, 'Video')}</div>` : ''}
+              </div>
+              <div class="card-actions">
+                <button class="btn btn-neutral" onclick="selectProduct(${p.id}, 'detail')">Review</button>
+                <button class="btn btn-green" onclick="approveProduct(${p.id})">Approve</button>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join('') || `<div class="panel" style="grid-column:1/-1; text-align:center; padding:50px;"><h2>No approved products found</h2><p class="card-muted">Only rows with Generation Status = Approved should appear here.</p></div>`;
+    }
+
+    function renderSummary(p) {
+      document.getElementById('productSummary').innerHTML = `
+        <div class="summary-img zoom-wrap">${makeZoomable(p.images.grid || p.images.front || p.images.full, p.title)}</div>
+        <div class="meta-table">
+          <div class="meta-row"><span>Product Code</span><strong>${p.code}</strong></div>
+          <div class="meta-row"><span>Product Title</span><strong>${p.title}</strong></div>
+          <div class="meta-row"><span>Category</span><strong>${p.category}</strong></div>
+          <div class="meta-row"><span>Price (INR)</span><strong>${formatPrice(p.price)}</strong></div>
+        </div>
+        <div class="meta-table">
+          <div class="meta-row"><span>Generation Status</span><strong><span class="badge">${p.generationStatus}</span></strong></div>
+          <div class="meta-row"><span>Approval Status</span><strong><span class="badge">${p.approvalStatus}</span></strong></div>
+          <div class="meta-row"><span>SHOPIFY</span><strong><span class="badge ${p.shopify === 'Approved' ? 'green' : p.shopify === 'Reject' ? 'red' : ''}">${p.shopify}</span></strong></div>
+          <div class="meta-row"><span>Last Modified</span><strong>${p.modified}</strong></div>
+          <div class="meta-row"><span>Specifications</span><strong>${p.specifications}</strong></div>
+        </div>
+      `;
+    }
+
+    function availableGenerated(p) {
+      return Object.keys(imageMap).filter(label => p.images[imageMap[label]]);
+    }
+
+    function renderGenerated(p) {
+      const tabs = document.getElementById('generatedTabs');
+      const strip = document.getElementById('thumbStrip');
+      const hero = document.getElementById('heroPreview');
+      const available = availableGenerated(p);
+      if (!available.includes(state.selectedGenerated)) state.selectedGenerated = available[0] || 'Front View';
+      tabs.innerHTML = available.map(label => `<button class="mini-tab ${label === state.selectedGenerated ? 'active' : ''}" onclick="state.selectedGenerated='${label}'; renderAll(false)">${label}</button>`).join('');
+      const heroSrc = p.images[imageMap[state.selectedGenerated]];
+      const isVideo = state.selectedGenerated === 'Video';
+      hero.innerHTML = `<div class="image-label">${isVideo ? 'Video' : `Generated ${state.selectedGenerated}`}</div>${makeMedia(heroSrc, `Generated ${state.selectedGenerated}`, isVideo ? 'video' : 'image')}`;
+      strip.innerHTML = available.map(label => {
+        const src = p.images[imageMap[label]];
+        return `<button class="thumb ${label === state.selectedGenerated ? 'active' : ''}" onclick="state.selectedGenerated='${label}'; renderAll(false)"><div class="thumb-img zoom-wrap">${makeMedia(src, label, label === 'Video' ? 'video' : 'image')}</div><small>${label}</small></button>`;
+      }).join('');
+    }
+
+    function renderReferences(p) {
+      const grid = document.getElementById('referenceGrid');
+      grid.innerHTML = Object.entries(refMap).map(([label, key]) => `
+        <div class="ref-card">
+          <div class="ref-img zoom-wrap">${makeZoomable(p.images[key], label)}</div>
+          <div class="ref-label">${label} Image</div>
+        </div>
+      `).join('');
+    }
+
+    function renderCompare(p) {
+      const refSel = document.getElementById('referenceSelect');
+      const genSel = document.getElementById('generatedSelect');
+      refSel.innerHTML = Object.keys(refMap).map(label => `<option ${label === state.selectedReference ? 'selected' : ''}>${label}</option>`).join('');
+      genSel.innerHTML = availableGenerated(p).map(label => `<option ${label === state.selectedGenerated ? 'selected' : ''}>${label}</option>`).join('');
+      const refSrc = p.images[refMap[state.selectedReference]];
+      const genSrc = p.images[imageMap[state.selectedGenerated]];
+      const genIsVideo = state.selectedGenerated === 'Video';
+      document.getElementById('compareRefTitle').textContent = `Reference - ${state.selectedReference}`;
+      document.getElementById('compareGenTitle').textContent = `Generated - ${state.selectedGenerated}`;
+      document.getElementById('compareRef').innerHTML = makeZoomable(refSrc, `Reference ${state.selectedReference}`);
+      document.getElementById('compareGen').innerHTML = makeMedia(genSrc, `Generated ${state.selectedGenerated}`, genIsVideo ? 'video' : 'image');
+    }
+
+    function renderMobile(p) {
+      document.getElementById('mobilePreview').innerHTML = `
+        <div class="phone">
+          <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
+          <div class="phone-tabs">${categories.slice(1,5).map((c,i)=>`<span class="tab ${i===0?'active':''}">${c.split(' ')[0]}<span class="count">${i===0 ? 43 : 0}</span></span>`).join('')}</div>
+          <div class="phone-card"><strong>${p.code}</strong><br>${p.title}<br><span class="price">${formatPrice(p.price)}</span><br><span class="badge">${p.generationStatus}</span></div>
+          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;"><button class="mini-tab active">Front</button><button class="mini-tab">Side</button><button class="mini-tab">Back</button><button class="mini-tab">Close-up</button></div><div class="phone-hero zoom-wrap">${makeZoomable(p.images.front, 'Mobile Front View')}</div></div>
+          <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
+        </div>
+        <div class="phone">
+          <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
+          <div class="phone-card"><div class="phone-ref">${Object.entries(refMap).map(([label,key]) => `<div class="ref-card"><div class="ref-img zoom-wrap">${makeZoomable(p.images[key], label)}</div><div class="ref-label">${label}</div></div>`).join('')}</div></div>
+          <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
+        </div>
+      `;
+    }
+
+    function renderAll(reset = true) {
+      renderCategories();
+      renderGrid();
+      const p = currentProduct();
+
+      if (!p) {
+        document.getElementById('productSummary').innerHTML = `<div class="panel" style="grid-column:1/-1; text-align:center; padding:42px;"><h2>No approved products found</h2><p class="card-muted">Only rows with Generation Status = Approved appear here.</p></div>`;
+        document.getElementById('generatedTabs').innerHTML = '';
+        document.getElementById('heroPreview').innerHTML = '<div class="empty-img">No product selected</div>';
+        document.getElementById('thumbStrip').innerHTML = '';
+        document.getElementById('referenceGrid').innerHTML = '';
+        document.getElementById('compareRef').innerHTML = '<div class="empty-img">No reference image</div>';
+        document.getElementById('compareGen').innerHTML = '<div class="empty-img">No generated image</div>';
+        document.getElementById('mobilePreview').innerHTML = '';
+      } else {
+        renderSummary(p);
+        renderGenerated(p);
+        renderReferences(p);
+        renderCompare(p);
+        renderMobile(p);
+      }
+      document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      document.getElementById('gridView').classList.toggle('active', state.view === 'grid');
+      document.getElementById('detailView').classList.toggle('hidden', state.view !== 'detail');
+      document.getElementById('gridBtn').classList.toggle('active', state.view === 'grid');
+      document.getElementById('detailBtn').classList.toggle('active', state.view === 'detail');
+      setTimeout(wireMagnifiers, 0);
+    }
+
+
+    function backToMainMenu() {
+      state.view = 'grid';
+      state.selectedCategory = 'All Collections';
+
+      const searchInput = document.getElementById('searchInput');
+      const categorySelect = document.getElementById('categorySelect');
+      const statusSelect = document.getElementById('statusSelect');
+      const sortSelect = document.getElementById('sortSelect');
+
+      if (searchInput) searchInput.value = '';
+      if (categorySelect) categorySelect.value = 'All Collections';
+      if (statusSelect) statusSelect.value = 'All Statuses';
+      if (sortSelect) sortSelect.value = 'Latest Updated';
+
+      const firstProduct = filteredProducts()[0];
+      if (firstProduct) state.selectedProductId = firstProduct.id;
+
+      renderAll(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast('Returned to main menu.');
+    }
+
+    function jumpToNextProduct() {
+      const list = filteredProducts();
+      if (!list.length) {
+        showToast('No next product available.');
+        return;
+      }
+
+      const currentIndex = list.findIndex(p => p.id === state.selectedProductId);
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % list.length;
+      const nextProduct = list[nextIndex];
+
+      state.selectedProductId = nextProduct.id;
+      state.view = 'detail';
+
+      renderAll(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast(`Moved to next product: ${nextProduct.code}`);
+    }
+
+    function selectProduct(id, view = 'detail') {
+      state.selectedProductId = id;
+      state.view = view;
+      renderAll();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function approveProduct(id) {
+      if (id) state.selectedProductId = id;
+
+      const listBeforeApproval = filteredProducts();
+      const p = currentProduct();
+      if (!p) return;
+
+      try {
+        const response = await fetch(`/api/products/${p.id}/approve`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            note: document.getElementById('approvalNote')?.value || ''
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Approve update failed');
+        }
+
+        p.shopify = 'Approved';
+        p.approvalStatus = 'Approved';
+
+        const currentIndex = listBeforeApproval.findIndex(item => item.id === p.id);
+        const nextProduct = listBeforeApproval[currentIndex + 1] || listBeforeApproval[0];
+
+        if (nextProduct && nextProduct.id !== p.id) {
+          state.selectedProductId = nextProduct.id;
+        }
+
+        renderAll(false);
+        showToast('Approved successfully. Jumped to next product.');
+
+        if (state.view === 'detail') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } catch (error) {
+        console.error(error);
+        showToast('Approve failed. Check backend server logs.');
+      }
+    }
+
+    async function rejectProduct() {
+      const p = currentProduct();
+      if (!p) return;
+
+      try {
+        const response = await fetch(`/api/products/${p.id}/reject`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            comment: document.getElementById('approvalNote')?.value || 'Rejected from review portal'
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Reject update failed');
+        }
+
+        p.shopify = 'Reject';
+        p.approvalStatus = 'Rejected';
+        renderAll(false);
+        showToast('Rejected and updated in Baserow.');
+      } catch (error) {
+        console.error(error);
+        showToast('Reject failed. Check backend server logs.');
+      }
+    }
+
+    function openRequestModal() { document.getElementById('requestModal').classList.add('active'); }
+    function closeRequestModal() { document.getElementById('requestModal').classList.remove('active'); }
+
+    async function submitChanges() {
+      const p = currentProduct();
+      if (!p) return;
+
+      const changeType = document.getElementById('changeType')?.value || 'Other';
+      const comment = document.getElementById('changeComment')?.value || 'Changes requested from review portal';
+
+      try {
+        const response = await fetch(`/api/products/${p.id}/request-changes`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ changeType, comment })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Request changes update failed');
+        }
+
+        p.shopify = 'Reject';
+        p.approvalStatus = 'Changes Requested';
+        p.comment = `Change Type: ${changeType}
+
+${comment}`;
+
+        closeRequestModal();
+        renderAll(false);
+        showToast('Feedback submitted and status updated.');
+      } catch (error) {
+        console.error(error);
+        showToast('Request changes failed. Check backend server logs.');
+      }
+    }
+
+    function showToast(message) {
+      const stack = document.getElementById('toastStack');
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.innerHTML = `<span class="tick">✓</span><span>${message}</span>`;
+      stack.appendChild(el);
+      setTimeout(() => el.remove(), 3800);
+    }
+
+    let lbZoom = 1;
+    let lbX = 0;
+    let lbY = 0;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    const MIN_ZOOM = 0.75;
+    const MAX_ZOOM = 6;
+    const ZOOM_STEP = 0.18;
+
+    function getLightboxImg() {
+      return document.getElementById('lightboxImg');
+    }
+
+    function getLightboxStage() {
+      return document.getElementById('lightboxStage');
+    }
+
+    function applyLightboxTransform() {
+      const imgEl = getLightboxImg();
+      imgEl.style.transform = `translate3d(${lbX}px, ${lbY}px, 0) scale(${lbZoom})`;
+    }
+
+    function openLightbox(src, title) {
+      lbZoom = 1;
+      lbX = 0;
+      lbY = 0;
+      dragging = false;
+
+      const imgEl = getLightboxImg();
+      imgEl.src = src;
+      imgEl.style.transform = 'translate3d(0px, 0px, 0) scale(1)';
+
+      document.getElementById('lightboxTitle').textContent = title || 'Image preview';
+      document.getElementById('lightbox').classList.add('active');
+      getLightboxStage().classList.remove('dragging');
+      applyLightboxTransform();
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('active');
+      dragging = false;
+      getLightboxStage().classList.remove('dragging');
+    }
+
+    function zoomAtPoint(delta, clientX, clientY) {
+      const stage = getLightboxStage();
+      const rect = stage.getBoundingClientRect();
+
+      const oldZoom = lbZoom;
+      const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, lbZoom + delta));
+
+      if (nextZoom === oldZoom) return;
+
+      const stageCenterX = rect.left + rect.width / 2;
+      const stageCenterY = rect.top + rect.height / 2;
+
+      const offsetX = clientX - stageCenterX;
+      const offsetY = clientY - stageCenterY;
+
+      const zoomRatio = nextZoom / oldZoom;
+
+      // Keep the image point under the cursor stable while zooming.
+      lbX = offsetX - (offsetX - lbX) * zoomRatio;
+      lbY = offsetY - (offsetY - lbY) * zoomRatio;
+      lbZoom = nextZoom;
+
+      applyLightboxTransform();
+    }
+
+    function setLightboxZoom(delta) {
+      const stage = getLightboxStage();
+      const rect = stage.getBoundingClientRect();
+      zoomAtPoint(delta, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+
+    function resetLightbox() {
+      lbZoom = 1;
+      lbX = 0;
+      lbY = 0;
+      applyLightboxTransform();
+    }
+
+    function startDrag(clientX, clientY) {
+      dragging = true;
+      lastX = clientX;
+      lastY = clientY;
+      getLightboxStage().classList.add('dragging');
+    }
+
+    function moveDrag(clientX, clientY) {
+      if (!dragging) return;
+
+      lbX += clientX - lastX;
+      lbY += clientY - lastY;
+
+      lastX = clientX;
+      lastY = clientY;
+
+      applyLightboxTransform();
+    }
+
+    function stopDrag() {
+      dragging = false;
+      getLightboxStage().classList.remove('dragging');
+    }
+
+    const stage = document.getElementById('lightboxStage');
+
+    // Mouse wheel zoom: scroll over image/stage to zoom in/out.
+    stage.addEventListener('wheel', e => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+      zoomAtPoint(delta, e.clientX, e.clientY);
+    }, { passive: false });
+
+    // Mouse hold + drag pan.
+    stage.addEventListener('mousedown', e => {
+      e.preventDefault();
+      startDrag(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('mousemove', e => {
+      moveDrag(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('mouseup', stopDrag);
+
+    // Touch support for mobile/tablet drag, because phones also enjoy making layouts suffer.
+    stage.addEventListener('touchstart', e => {
+      if (!e.touches || !e.touches.length) return;
+      e.preventDefault();
+      startDrag(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+    stage.addEventListener('touchmove', e => {
+      if (!e.touches || !e.touches.length) return;
+      e.preventDefault();
+      moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+    stage.addEventListener('touchend', stopDrag);
+    stage.addEventListener('touchcancel', stopDrag);
+
+    // Keyboard shortcuts inside modal.
+    window.addEventListener('keydown', e => {
+      if (!document.getElementById('lightbox').classList.contains('active')) return;
+
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === '+') setLightboxZoom(ZOOM_STEP);
+      if (e.key === '-') setLightboxZoom(-ZOOM_STEP);
+      if (e.key === '0') resetLightbox();
+    });
+
+    document.getElementById('gridBtn').addEventListener('click', () => { state.view = 'grid'; renderAll(false); });
+    document.getElementById('backMainBtn').addEventListener('click', backToMainMenu);
+    document.getElementById('detailBtn').addEventListener('click', () => { state.view = 'detail'; renderAll(false); });
+    document.getElementById('categorySelect').addEventListener('change', e => selectCategory(e.target.value));
+    let searchDebounce;
+    document.getElementById('searchInput').addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => fetchProductsFromAPI(), 350);
+    });
+    document.getElementById('statusSelect').addEventListener('change', () => fetchProductsFromAPI());
+    document.getElementById('sortSelect').addEventListener('change', () => fetchProductsFromAPI());
+    document.getElementById('referenceSelect').addEventListener('change', e => { state.selectedReference = e.target.value; renderAll(false); });
+    document.getElementById('generatedSelect').addEventListener('change', e => { state.selectedGenerated = e.target.value; renderAll(false); });
+    document.getElementById('changeComment').addEventListener('input', e => document.getElementById('charCount').textContent = e.target.value.length);
+    document.getElementById('refreshBtn').addEventListener('click', () => fetchProductsFromAPI({ showToast: true }));
+    setInterval(() => fetchProductsFromAPI(), 15000);
+
+    fetchProductsFromAPI();
+  </script>
+</body>
+</html>
