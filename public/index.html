@@ -1677,9 +1677,6 @@
           throw new Error(data.error || 'Approve update failed');
         }
 
-        p.shopify = 'Approved';
-        p.approvalStatus = 'Approved';
-
         const currentIndex = listBeforeApproval.findIndex(item => item.id === p.id);
         const nextProduct = listBeforeApproval[currentIndex + 1] || listBeforeApproval[0];
 
@@ -1687,8 +1684,9 @@
           state.selectedProductId = nextProduct.id;
         }
 
-        renderAll(false);
-        showToast('Approved successfully. Jumped to next product.');
+        await fetchCollections();
+        await fetchProductsFromAPI();
+        showToast('Approved successfully and updated in Baserow.');
 
         if (state.view === 'detail') {
           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1718,10 +1716,9 @@
           throw new Error(data.error || 'Reject update failed');
         }
 
-        p.shopify = 'Reject';
-        p.approvalStatus = 'Rejected';
-        renderAll(false);
-        showToast('Rejected and updated in Baserow.');
+        await fetchCollections();
+        await fetchProductsFromAPI();
+        showToast('Rejected and moved to Failed.');
       } catch (error) {
         console.error(error);
         showToast('Reject failed. Check backend server logs.');
@@ -1751,15 +1748,10 @@
           throw new Error(data.error || 'Request changes update failed');
         }
 
-        p.shopify = 'Reject';
-        p.approvalStatus = 'Changes Requested';
-        p.comment = `Change Type: ${changeType}
-
-${comment}`;
-
         closeRequestModal();
-        renderAll(false);
-        showToast('Feedback submitted and status updated.');
+        await fetchCollections();
+        await fetchProductsFromAPI();
+        showToast('Feedback submitted and moved to Failed.');
       } catch (error) {
         console.error(error);
         showToast('Request changes failed. Check backend server logs.');

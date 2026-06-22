@@ -16,6 +16,10 @@ const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
 const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 
+const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
+const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
+const GENERATION_STATUS_FAILED_VALUE = "Failed";
+
 const SAREE_TABLES = [
   {
     name: "Kanjivaram Silks",
@@ -165,7 +169,7 @@ const SAREE_TABLES = [
     name: "Art Silk Sarees",
     tableId: 935218,
     fields: {
-      generationStatus: "field_8123270",
+      generationStatus: "field_8123271",
       shopify: "field_8123274",
       comment: "field_8123272",
     },
@@ -263,6 +267,72 @@ async function fetchFieldMap(tableId) {
   };
   fieldMapCache.set(String(tableId), fieldMap);
   return fieldMap;
+}
+
+function numericFieldId(fieldKey) {
+  const match = String(fieldKey || "").match(/^field_(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function findConfiguredField(fieldMap, fieldKey) {
+  const fieldId = numericFieldId(fieldKey);
+  return fieldId ? fieldMap.fields.find((field) => Number(field.id) === fieldId) || null : null;
+}
+
+function getSelectOptionValues(field) {
+  if (!field || !Array.isArray(field.select_options)) return [];
+  return field.select_options.map((option) => String(option.value || option.name || ""));
+}
+
+function validateTableFields(tableConfig, fieldMap) {
+  const warnings = [];
+  const generationField = findConfiguredField(fieldMap, tableConfig.fields.generationStatus);
+  const shopifyField = findConfiguredField(fieldMap, tableConfig.fields.shopify);
+  const commentField = tableConfig.fields.comment
+    ? findConfiguredField(fieldMap, tableConfig.fields.comment)
+    : null;
+
+  if (!generationField) {
+    warnings.push(`Configured Generation Status field ${tableConfig.fields.generationStatus} was not found.`);
+  } else if (!getSelectOptionValues(generationField).includes(GENERATION_STATUS_FAILED_VALUE)) {
+    warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option Failed.`);
+  }
+
+  if (!shopifyField) {
+    warnings.push(`Configured Shopify Notes field ${tableConfig.fields.shopify} was not found.`);
+  } else {
+    const shopifyOptions = getSelectOptionValues(shopifyField);
+    const isSelectField = /select/.test(String(shopifyField.type || ""));
+    if (isSelectField && !shopifyOptions.includes(SHOPIFY_NOTES_APPROVED_VALUE)) {
+      warnings.push(`Shopify Notes select field ${tableConfig.fields.shopify} does not include option Approved.`);
+    }
+    if (isSelectField && !shopifyOptions.includes(SHOPIFY_NOTES_REJECT_VALUE)) {
+      warnings.push(`Shopify Notes select field ${tableConfig.fields.shopify} does not include option Reject.`);
+    }
+  }
+
+  if (tableConfig.fields.comment && !commentField) {
+    warnings.push(`Configured Comment field ${tableConfig.fields.comment} was not found.`);
+  }
+
+  if (
+    tableConfig.tableId === 948083 &&
+    shopifyField &&
+    !/shopify/i.test(String(shopifyField.name || ""))
+  ) {
+    warnings.push("Configured Shopify Notes field for Kanjivaram may not match live field name.");
+  } else if (shopifyField && !/shopify/i.test(String(shopifyField.name || ""))) {
+    warnings.push(`Configured Shopify Notes field name is "${shopifyField.name}".`);
+  }
+
+  return {
+    warnings,
+    fields: {
+      generationStatus: generationField ? { id: generationField.id, name: generationField.name, type: generationField.type, options: getSelectOptionValues(generationField) } : null,
+      shopifyNotes: shopifyField ? { id: shopifyField.id, name: shopifyField.name, type: shopifyField.type, acceptsFreeText: !/select/.test(String(shopifyField.type || "")), options: getSelectOptionValues(shopifyField) } : null,
+      comment: commentField ? { id: commentField.id, name: commentField.name, type: commentField.type } : null,
+    },
+  };
 }
 
 function getFileUrl(field) {
@@ -464,13 +534,14 @@ async function patchBaserowRow(tableId, rowId, payload) {
 
 function buildApprovePayload(tableConfig) {
   return {
-    [tableConfig.fields.shopify]: "Approved",
+    [tableConfig.fields.shopify]: SHOPIFY_NOTES_APPROVED_VALUE,
   };
 }
 
 function buildRejectPayload(tableConfig, commentText) {
   const payload = {
-    [tableConfig.fields.shopify]: "Reject",
+    [tableConfig.fields.shopify]: SHOPIFY_NOTES_REJECT_VALUE,
+    [tableConfig.fields.generationStatus]: GENERATION_STATUS_FAILED_VALUE,
   };
 
   if (tableConfig.fields.comment) {
@@ -636,6 +707,9 @@ app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
 
     res.json({
       success: true,
+      tableId: Number(tableId),
+      rowId: Number(rowId),
+      action: "approve",
       message: "Product approved for Shopify.",
       row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
@@ -652,13 +726,17 @@ app.patch("/api/products/:tableId/:rowId/request-changes", async (req, res) => {
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
-    const { changeType = "Other", comment = "" } = req.body || {};
-    const finalComment = `Change Type: ${changeType}\n\n${comment || "Changes requested from review portal."}`;
+    const { changeType = "Other", feedback = "", comment = "" } = req.body || {};
+    const feedbackText = feedback || comment || "Changes requested from review portal.";
+    const finalComment = `Change Type: ${changeType}\n\n${feedbackText}`;
     const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, finalComment));
     const fieldMap = await fetchFieldMap(tableId);
 
     res.json({
       success: true,
+      tableId: Number(tableId),
+      rowId: Number(rowId),
+      action: "request-changes",
       message: "Request changes saved.",
       row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
@@ -675,12 +753,16 @@ app.patch("/api/products/:tableId/:rowId/reject", async (req, res) => {
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
 
-    const { comment = "Rejected from review portal" } = req.body || {};
-    const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, comment));
+    const { feedback = "", comment = "" } = req.body || {};
+    const feedbackText = feedback || comment || "Rejected from review portal";
+    const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, feedbackText));
     const fieldMap = await fetchFieldMap(tableId);
 
     res.json({
       success: true,
+      tableId: Number(tableId),
+      rowId: Number(rowId),
+      action: "reject",
       message: "Product rejected.",
       row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
@@ -719,7 +801,8 @@ app.get("/api/baserow/diagnose", async (req, res) => {
 
     await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
       try {
-        const { approvedRows } = await fetchApprovedForTable(tableConfig);
+        const { approvedRows, fieldMap } = await fetchApprovedForTable(tableConfig);
+        const validation = validateTableFields(tableConfig, fieldMap);
         tables.push({
           name: tableConfig.name,
           tableId: tableConfig.tableId,
@@ -728,6 +811,8 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           shopifyField: tableConfig.fields.shopify,
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
+          liveFields: validation.fields,
+          warnings: validation.warnings,
           error: null,
         });
       } catch (error) {
@@ -739,6 +824,8 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           shopifyField: tableConfig.fields.shopify,
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
+          liveFields: null,
+          warnings: [],
           error: error.baserow || error.message,
         });
       }
@@ -751,6 +838,7 @@ app.get("/api/baserow/diagnose", async (req, res) => {
 
     const accessibleTables = tables.filter((table) => table.readAccess).length;
     const failedTables = tables.length - accessibleTables;
+    const warningCount = tables.reduce((sum, table) => sum + table.warnings.length, 0);
 
     res.json({
       success: failedTables === 0,
@@ -760,6 +848,7 @@ app.get("/api/baserow/diagnose", async (req, res) => {
         totalTables: SAREE_TABLES.length,
         accessibleTables,
         failedTables,
+        warningCount,
         totalApprovedRows: tables.reduce((sum, table) => sum + table.approvedRows, 0),
       },
     });

@@ -23,7 +23,7 @@ const SAREE_TABLES = [
   { name: "Jamawar Silk Sarees", tableId: 935214, fields: { generationStatus: "field_8123203", shopify: "field_8123206", comment: null } },
   { name: "Cotton Saree", tableId: 935216, fields: { generationStatus: "field_8123237", shopify: "field_8123240", comment: "field_8123238" } },
   { name: "Linen & Kota Silk Sarees", tableId: 935217, fields: { generationStatus: "field_8123254", shopify: "field_8123257", comment: "field_8123255" } },
-  { name: "Art Silk Sarees", tableId: 935218, fields: { generationStatus: "field_8123270", shopify: "field_8123274", comment: "field_8123272" } },
+  { name: "Art Silk Sarees", tableId: 935218, fields: { generationStatus: "field_8123271", shopify: "field_8123274", comment: "field_8123272" } },
   { name: "Bandhani Silk Saree", tableId: 935212, fields: { generationStatus: "field_8123169", shopify: "field_8123172", comment: "field_8123170" } },
 ];
 

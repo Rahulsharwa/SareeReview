@@ -42,14 +42,18 @@ Approve updates only:
 SHOPIFY = Approved
 ```
 
+Generation Status is not changed by Approve.
+
 Reject and Request Changes update:
 
 ```text
 SHOPIFY = Reject
+Generation Status = Failed
 Comment = feedback text
 ```
 
 If a table has no Comment field, the backend skips Comment and still updates SHOPIFY.
+Rejected and request-change rows disappear from the review dashboard after refresh because only `Generation Status = Approved` rows are listed.
 
 ## Table And Field IDs
 
@@ -71,7 +75,7 @@ If a table has no Comment field, the backend skips Comment and still updates SHO
 | Jamawar Silk Sarees | 935214 | field_8123203 | field_8123206 | none |
 | Cotton Saree | 935216 | field_8123237 | field_8123240 | field_8123238 |
 | Linen & Kota Silk Sarees | 935217 | field_8123254 | field_8123257 | field_8123255 |
-| Art Silk Sarees | 935218 | field_8123270 | field_8123274 | field_8123272 |
+| Art Silk Sarees | 935218 | field_8123271 | field_8123274 | field_8123272 |
 | Bandhani Silk Saree | 935212 | field_8123169 | field_8123172 | field_8123170 |
 
 ## Commands
