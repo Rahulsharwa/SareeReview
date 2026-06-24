@@ -157,6 +157,24 @@ const SAREE_TABLES = [
     },
   },
   {
+    name: "Cotton Suits",
+    tableId: 936059,
+    fields: {
+      generationStatus: "field_8132747",
+      shopify: "field_8132750",
+      comment: "field_8132748",
+    },
+  },
+  {
+    name: "Silk Suits",
+    tableId: 936060,
+    fields: {
+      generationStatus: "field_8132764",
+      shopify: "field_8132767",
+      comment: "field_8132765",
+    },
+  },
+  {
     name: "Linen & Kota Silk Sarees",
     tableId: 935217,
     fields: {
@@ -234,6 +252,34 @@ function readField(row, fieldId, fallbackName, fieldMap = null) {
   return null;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isBaserowThrottle(response, data) {
+  return response.status === 429 || data?.detail === "Request was throttled.";
+}
+
+async function fetchBaserowJsonWithRetry(url, options, maxAttempts = 4) {
+  let lastResponse = null;
+  let lastData = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(url, options);
+    const data = await response.json();
+
+    if (response.ok || !isBaserowThrottle(response, data) || attempt === maxAttempts) {
+      return { response, data };
+    }
+
+    lastResponse = response;
+    lastData = data;
+    await sleep(500 * attempt);
+  }
+
+  return { response: lastResponse, data: lastData };
+}
+
 async function fetchFieldMap(tableId) {
   assertConfig();
 
@@ -241,14 +287,12 @@ async function fetchFieldMap(tableId) {
     return fieldMapCache.get(String(tableId));
   }
 
-  const response = await fetch(`${BASEROW_API_URL}/api/database/fields/table/${tableId}/`, {
+  const { response, data } = await fetchBaserowJsonWithRetry(`${BASEROW_API_URL}/api/database/fields/table/${tableId}/`, {
     headers: {
       Authorization: `Token ${BASEROW_TOKEN}`,
       Accept: "application/json",
     },
   });
-
-  const data = await response.json();
 
   if (!response.ok) {
     const details = typeof data === "object" ? JSON.stringify(data) : String(data);
@@ -441,14 +485,12 @@ async function fetchBaserowRows(tableId) {
     });
 
     const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/?${params.toString()}`;
-    const response = await fetch(url, {
+    const { response, data } = await fetchBaserowJsonWithRetry(url, {
       headers: {
         Authorization: `Token ${BASEROW_TOKEN}`,
         Accept: "application/json",
       },
     });
-
-    const data = await response.json();
 
     if (!response.ok) {
       const details = typeof data === "object" ? JSON.stringify(data) : String(data);
