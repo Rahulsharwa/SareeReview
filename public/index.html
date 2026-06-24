@@ -607,40 +607,56 @@
       z-index: 2;
     }
 
-    .thumb-strip {
+    .thumb-strip,
+    .generated-thumb-strip {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
       margin-top: 14px;
     }
 
-    .thumb {
+    .thumb,
+    .generated-thumb {
       border: 1px solid var(--border);
       background: #fff7ea;
       border-radius: 13px;
       padding: 6px;
       min-width: 0;
+      display: grid;
+      grid-template-rows: minmax(72px, 1fr) auto;
+      gap: 6px;
     }
 
-    .thumb.active { border-color: var(--maroon); box-shadow: 0 0 0 2px rgba(122,15,29,.12); }
+    .thumb.active,
+    .generated-thumb.active { border-color: var(--maroon); box-shadow: 0 0 0 2px rgba(122,15,29,.12); }
 
-    .thumb .thumb-img {
+    .thumb .thumb-img,
+    .generated-thumb-media {
       height: 72px;
       border-radius: 9px;
       overflow: hidden;
       position: relative;
     }
 
-    .thumb small {
+    .thumb small,
+    .generated-thumb-label {
       display: block;
       text-align: center;
-      margin-top: 6px;
       font-size: 11px;
       font-weight: 800;
       color: var(--text);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .generated-video,
+    .generated-video-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #17110d;
+      border-radius: inherit;
     }
 
     .reference-grid {
@@ -1447,14 +1463,14 @@
       selectedReference: 'Full Saree'
     };
 
-    const imageMap = {
-      'Front View': 'front',
-      'Side View': 'side',
-      'Back View': 'back',
-      'Close-up View': 'close',
-      'Grid View': 'grid',
-      'Video': 'video'
-    };
+    const GENERATED_MEDIA = [
+      { label: 'Front View', key: 'front', type: 'image', shortLabel: 'Front' },
+      { label: 'Side View', key: 'side', type: 'image', shortLabel: 'Side' },
+      { label: 'Back View', key: 'back', type: 'image', shortLabel: 'Back' },
+      { label: 'Close-up View', key: 'close', type: 'image', shortLabel: 'Close-up' },
+      { label: 'Grid View', key: 'grid', type: 'image', shortLabel: 'Grid' },
+      { label: 'Video', key: 'video', type: 'video', shortLabel: 'Video' }
+    ];
 
     const refMap = {
       'Full Saree': 'full',
@@ -1556,7 +1572,15 @@
     function makeMedia(src, label, type = 'image') {
       if (!src) return `<div class="empty-img">Media not available</div>`;
       if (type === 'video') {
-        return `<video src="${src}" class="fit-img" controls preload="metadata"></video>`;
+        return `<video controls preload="metadata" class="generated-video"><source src="${src}">Your browser does not support the video tag.</video>`;
+      }
+      return makeZoomable(src, label);
+    }
+
+    function makeMediaThumb(src, label, type = 'image') {
+      if (!src) return `<div class="empty-img">Media not available</div>`;
+      if (type === 'video') {
+        return `<video src="${src}" class="generated-video-thumb" preload="metadata" muted playsinline></video>`;
       }
       return makeZoomable(src, label);
     }
@@ -1604,7 +1628,7 @@
       const grid = document.getElementById('gridView');
       const list = filteredProducts();
       grid.innerHTML = list.map(p => {
-        const keys = ['front','side','back','close','grid'];
+        const generatedItems = availableGenerated(p);
         return `
           <article class="product-card">
             <div class="card-img zoom-wrap">${makeZoomable(p.images.grid || p.images.front || p.images.full, p.title)}</div>
@@ -1618,8 +1642,7 @@
                 <span class="badge ${p.shopify === 'Approved' ? 'green' : ''}">Shopify: ${p.shopify}</span>
               </div>
               <div class="mini-thumbs">
-                ${keys.map(k => `<div class="mini-thumb zoom-wrap">${makeZoomable(p.images[k], k.toUpperCase())}</div>`).join('')}
-                ${p.images.video ? `<div class="mini-thumb zoom-wrap">${makeZoomable(p.images.video, 'Video')}</div>` : ''}
+                ${generatedItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(p.images[item.key], item.shortLabel, item.type)}</div>`).join('')}
               </div>
               <div class="card-actions">
                 <button class="btn btn-neutral" onclick="selectProduct('${p.id}', 'detail')">Review</button>
@@ -1651,7 +1674,8 @@
     }
 
     function availableGenerated(p) {
-      return Object.keys(imageMap).filter(label => p.images[imageMap[label]]);
+      if (!p || !p.images) return [];
+      return GENERATED_MEDIA.filter(item => Boolean(p.images[item.key]));
     }
 
     function renderGenerated(p) {
@@ -1659,14 +1683,27 @@
       const strip = document.getElementById('thumbStrip');
       const hero = document.getElementById('heroPreview');
       const available = availableGenerated(p);
-      if (!available.includes(state.selectedGenerated)) state.selectedGenerated = available[0] || 'Front View';
-      tabs.innerHTML = available.map(label => `<button class="mini-tab ${label === state.selectedGenerated ? 'active' : ''}" onclick="state.selectedGenerated='${label}'; renderAll(false)">${label}</button>`).join('');
-      const heroSrc = p.images[imageMap[state.selectedGenerated]];
-      const isVideo = state.selectedGenerated === 'Video';
-      hero.innerHTML = `<div class="image-label">${isVideo ? 'Video' : `Generated ${state.selectedGenerated}`}</div>${makeMedia(heroSrc, `Generated ${state.selectedGenerated}`, isVideo ? 'video' : 'image')}`;
-      strip.innerHTML = available.map(label => {
-        const src = p.images[imageMap[label]];
-        return `<button class="thumb ${label === state.selectedGenerated ? 'active' : ''}" onclick="state.selectedGenerated='${label}'; renderAll(false)"><div class="thumb-img zoom-wrap">${makeMedia(src, label, label === 'Video' ? 'video' : 'image')}</div><small>${label}</small></button>`;
+      if (!available.length) {
+        tabs.innerHTML = '';
+        hero.innerHTML = '<div class="empty-img">No generated output available</div>';
+        strip.innerHTML = '';
+        return;
+      }
+
+      let selected = available.find(item => item.label === state.selectedGenerated);
+      if (!selected) {
+        selected = available[0];
+        state.selectedGenerated = selected.label;
+      }
+
+      tabs.innerHTML = available.map(item => `<button class="mini-tab ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)">${item.label}</button>`).join('');
+      const heroSrc = p.images[selected.key];
+      const heroLabel = selected.type === 'video' ? 'Generated Video Output' : `Generated ${selected.label}`;
+      hero.innerHTML = `<div class="image-label">${heroLabel}</div>${makeMedia(heroSrc, heroLabel, selected.type)}`;
+      strip.className = 'thumb-strip generated-thumb-strip';
+      strip.innerHTML = available.map(item => {
+        const src = p.images[item.key];
+        return `<button class="thumb generated-thumb ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)"><div class="thumb-img generated-thumb-media zoom-wrap">${makeMediaThumb(src, item.label, item.type)}</div><span class="generated-thumb-label">${item.label}</span></button>`;
       }).join('');
     }
 
@@ -1683,15 +1720,20 @@
     function renderCompare(p) {
       const refSel = document.getElementById('referenceSelect');
       const genSel = document.getElementById('generatedSelect');
+      const available = availableGenerated(p);
+      let selected = available.find(item => item.label === state.selectedGenerated);
+      if (!selected && available.length) {
+        selected = available[0];
+        state.selectedGenerated = selected.label;
+      }
       refSel.innerHTML = Object.keys(refMap).map(label => `<option ${label === state.selectedReference ? 'selected' : ''}>${label}</option>`).join('');
-      genSel.innerHTML = availableGenerated(p).map(label => `<option ${label === state.selectedGenerated ? 'selected' : ''}>${label}</option>`).join('');
+      genSel.innerHTML = available.map(item => `<option ${item.label === state.selectedGenerated ? 'selected' : ''}>${item.label}</option>`).join('');
       const refSrc = p.images[refMap[state.selectedReference]];
-      const genSrc = p.images[imageMap[state.selectedGenerated]];
-      const genIsVideo = state.selectedGenerated === 'Video';
+      const genSrc = selected ? p.images[selected.key] : null;
       document.getElementById('compareRefTitle').textContent = `Reference - ${state.selectedReference}`;
-      document.getElementById('compareGenTitle').textContent = `Generated - ${state.selectedGenerated}`;
+      document.getElementById('compareGenTitle').textContent = selected ? `Generated - ${selected.label}` : 'Generated Output';
       document.getElementById('compareRef').innerHTML = makeZoomable(refSrc, `Reference ${state.selectedReference}`);
-      document.getElementById('compareGen').innerHTML = makeMedia(genSrc, `Generated ${state.selectedGenerated}`, genIsVideo ? 'video' : 'image');
+      document.getElementById('compareGen').innerHTML = selected ? makeMedia(genSrc, `Generated ${selected.label}`, selected.type) : '<div class="empty-img">No generated output available</div>';
     }
 
     function renderMobile(p) {

@@ -252,6 +252,16 @@ function readField(row, fieldId, fallbackName, fieldMap = null) {
   return null;
 }
 
+function getByAliases(row, aliases, fieldMap = null) {
+  for (const alias of aliases) {
+    const value = readField(row, null, alias, fieldMap);
+    if (value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -379,10 +389,38 @@ function validateTableFields(tableConfig, fieldMap) {
   };
 }
 
-function getFileUrl(field) {
-  if (!Array.isArray(field) || field.length === 0) return null;
-  const file = field[0];
-  return file?.url || file?.thumbnails?.card_cover?.url || file?.thumbnails?.small?.url || null;
+function getFileUrl(value) {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const file = value[0];
+    if (!file) return null;
+    return (
+      file.url ||
+      file.thumbnails?.large?.url ||
+      file.thumbnails?.card_cover?.url ||
+      file.thumbnails?.small?.url ||
+      file.thumbnails?.tiny?.url ||
+      null
+    );
+  }
+
+  if (typeof value === "object") {
+    return (
+      value.url ||
+      value.thumbnails?.large?.url ||
+      value.thumbnails?.card_cover?.url ||
+      value.thumbnails?.small?.url ||
+      value.thumbnails?.tiny?.url ||
+      null
+    );
+  }
+
+  return null;
 }
 
 function parsePrice(value) {
@@ -402,6 +440,49 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   const generationStatus = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
   const shopify = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
   const comment = readField(row, tableConfig.fields.comment, "Comment", fieldMap);
+  const images = {
+    full: getFileUrl(getByAliases(row, ["Full Saree Image"], fieldMap)),
+    blouse: getFileUrl(getByAliases(row, ["Blouse Image"], fieldMap)),
+    pallu: getFileUrl(getByAliases(row, ["Pallu Image"], fieldMap)),
+    border: getFileUrl(getByAliases(row, ["Border Image"], fieldMap)),
+    front: getFileUrl(getByAliases(row, [
+      "Generated Front View",
+      "Front View",
+      "Generated Front",
+      "Front",
+    ], fieldMap)),
+    side: getFileUrl(getByAliases(row, [
+      "Side View",
+      "Generated Side View",
+      "Side",
+    ], fieldMap)),
+    back: getFileUrl(getByAliases(row, [
+      "Back View",
+      "Generated Back View",
+      "Back",
+    ], fieldMap)),
+    close: getFileUrl(getByAliases(row, [
+      "Closeup View",
+      "Close Up View",
+      "Close-up View",
+      "Closeup",
+      "Close Up",
+      "Generated Closeup View",
+      "Generated Close Up View",
+      "Generated Close-up View",
+    ], fieldMap)),
+    grid: getFileUrl(getByAliases(row, [
+      "Grid View",
+      "Generated Grid View",
+      "Grid",
+    ], fieldMap)),
+    video: getFileUrl(getByAliases(row, [
+      "Video",
+      "Generated Video",
+      "Video Output",
+      "Generated Video Output",
+    ], fieldMap)),
+  };
 
   return {
     id: `${tableConfig.tableId}-${row.id}`,
@@ -423,18 +504,7 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
       shopify,
       approvel: readField(row, null, "Approvel", fieldMap),
     },
-    images: {
-      full: getFileUrl(readField(row, null, "Full Saree Image", fieldMap)),
-      blouse: getFileUrl(readField(row, null, "Blouse Image", fieldMap)),
-      pallu: getFileUrl(readField(row, null, "Pallu Image", fieldMap)),
-      border: getFileUrl(readField(row, null, "Border Image", fieldMap)),
-      front: getFileUrl(readField(row, null, "Generated Front View", fieldMap)),
-      side: getFileUrl(readField(row, null, "Side View", fieldMap)),
-      back: getFileUrl(readField(row, null, "Back View", fieldMap)),
-      close: getFileUrl(readField(row, null, "Close Up View", fieldMap)),
-      grid: getFileUrl(readField(row, null, "Grid View", fieldMap)),
-      video: getFileUrl(readField(row, null, "Video", fieldMap)),
-    },
+    images,
   };
 }
 
