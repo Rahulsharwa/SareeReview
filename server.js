@@ -20,6 +20,37 @@ const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
 const GENERATION_STATUS_FAILED_VALUE = "Failed";
 
+const REFERENCE_MEDIA_ALIASES = {
+  full: ["Full Saree Image", "Saree Image", "Full Image"],
+  blouse: ["Blouse Image", "Blouse"],
+  pallu: ["Pallu Image", "Pallu"],
+  border: ["Border Image", "Border"],
+  fullSuit: ["Full Suit Image", "Front Suit Image", "Suit Full Image", "Full Salwar Suit Image", "Full Image"],
+  suitBack: ["Back Image", "Suit Back Image", "Back Suit Image"],
+};
+
+const GENERATED_MEDIA_ALIASES = {
+  front: ["Generated Front View", "Front View", "Front", "Generated Front"],
+  side: ["Side View", "Generated Side View", "Side", "Generated Side"],
+  back: ["Back View", "Generated Back View", "Back", "Generated Back"],
+  close: [
+    "Closeup View",
+    "Close Up View",
+    "Close-Up View",
+    "Close-up View",
+    "Closeup",
+    "Close Up",
+    "Close-Up",
+    "Close-up",
+    "Generated Closeup View",
+    "Generated Close Up View",
+    "Generated Close-Up View",
+    "Generated Close-up View",
+  ],
+  grid: ["Grid View", "Generated Grid View", "Grid", "Generated Grid"],
+  video: ["Video", "Generated Video", "Video Output", "Generated Video Output"],
+};
+
 const SAREE_TABLES = [
   {
     name: "Kanjivaram Silks",
@@ -252,6 +283,13 @@ function readField(row, fieldId, fallbackName, fieldMap = null) {
   return null;
 }
 
+function normalizeFieldName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "")
+    .trim();
+}
+
 function getByAliases(row, aliases, fieldMap = null) {
   for (const alias of aliases) {
     const value = readField(row, null, alias, fieldMap);
@@ -260,6 +298,39 @@ function getByAliases(row, aliases, fieldMap = null) {
     }
   }
   return null;
+}
+
+function getByNormalizedAliases(row, aliases) {
+  if (!row) return null;
+
+  const normalizedAliases = new Set(aliases.map((alias) => normalizeFieldName(alias)));
+
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedAliases.has(normalizeFieldName(key))) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function rowWithFieldNames(rawRow, fields = []) {
+  const fieldNameByRawKey = {};
+
+  fields.forEach((field) => {
+    fieldNameByRawKey[`field_${field.id}`] = field.name;
+  });
+
+  const result = { ...rawRow };
+
+  for (const [key, value] of Object.entries(rawRow || {})) {
+    const fieldName = fieldNameByRawKey[key];
+    if (fieldName) {
+      result[fieldName] = value;
+    }
+  }
+
+  return result;
 }
 
 function sleep(ms) {
@@ -336,6 +407,51 @@ function findConfiguredField(fieldMap, fieldKey) {
 function getSelectOptionValues(field) {
   if (!field || !Array.isArray(field.select_options)) return [];
   return field.select_options.map((option) => String(option.value || option.name || ""));
+}
+
+function findFieldByAliases(fieldMap, aliases) {
+  const normalizedAliases = new Set(aliases.map((alias) => normalizeFieldName(alias)));
+  const field = fieldMap?.fields?.find((item) => normalizedAliases.has(normalizeFieldName(item.name)));
+  return field ? { id: field.id, name: field.name, type: field.type } : null;
+}
+
+function detectMediaFields(fieldMap) {
+  return {
+    generatedMediaFields: Object.fromEntries(
+      Object.entries(GENERATED_MEDIA_ALIASES).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
+    ),
+    referenceMediaFields: Object.fromEntries(
+      Object.entries(REFERENCE_MEDIA_ALIASES).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
+    ),
+  };
+}
+
+function sampleMediaAvailability(rows, tableConfig, fieldMap) {
+  const counts = {
+    rowsChecked: rows.length,
+    frontCount: 0,
+    sideCount: 0,
+    backCount: 0,
+    closeCount: 0,
+    gridCount: 0,
+    videoCount: 0,
+    fullSuitCount: 0,
+    suitBackCount: 0,
+  };
+
+  rows.forEach((row) => {
+    const images = normalizeProduct(row, tableConfig, fieldMap).images;
+    if (images.front) counts.frontCount += 1;
+    if (images.side) counts.sideCount += 1;
+    if (images.back) counts.backCount += 1;
+    if (images.close) counts.closeCount += 1;
+    if (images.grid) counts.gridCount += 1;
+    if (images.video) counts.videoCount += 1;
+    if (images.fullSuit) counts.fullSuitCount += 1;
+    if (images.suitBack) counts.suitBackCount += 1;
+  });
+
+  return counts;
 }
 
 function validateTableFields(tableConfig, fieldMap) {
@@ -440,48 +556,20 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   const generationStatus = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
   const shopify = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
   const comment = readField(row, tableConfig.fields.comment, "Comment", fieldMap);
+  const namedRow = rowWithFieldNames(row, fieldMap?.fields || []);
   const images = {
-    full: getFileUrl(getByAliases(row, ["Full Saree Image"], fieldMap)),
-    blouse: getFileUrl(getByAliases(row, ["Blouse Image"], fieldMap)),
-    pallu: getFileUrl(getByAliases(row, ["Pallu Image"], fieldMap)),
-    border: getFileUrl(getByAliases(row, ["Border Image"], fieldMap)),
-    front: getFileUrl(getByAliases(row, [
-      "Generated Front View",
-      "Front View",
-      "Generated Front",
-      "Front",
-    ], fieldMap)),
-    side: getFileUrl(getByAliases(row, [
-      "Side View",
-      "Generated Side View",
-      "Side",
-    ], fieldMap)),
-    back: getFileUrl(getByAliases(row, [
-      "Back View",
-      "Generated Back View",
-      "Back",
-    ], fieldMap)),
-    close: getFileUrl(getByAliases(row, [
-      "Closeup View",
-      "Close Up View",
-      "Close-up View",
-      "Closeup",
-      "Close Up",
-      "Generated Closeup View",
-      "Generated Close Up View",
-      "Generated Close-up View",
-    ], fieldMap)),
-    grid: getFileUrl(getByAliases(row, [
-      "Grid View",
-      "Generated Grid View",
-      "Grid",
-    ], fieldMap)),
-    video: getFileUrl(getByAliases(row, [
-      "Video",
-      "Generated Video",
-      "Video Output",
-      "Generated Video Output",
-    ], fieldMap)),
+    full: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.full)),
+    blouse: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.blouse)),
+    pallu: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.pallu)),
+    border: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.border)),
+    fullSuit: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.fullSuit)),
+    suitBack: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.suitBack)),
+    front: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.front)),
+    side: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.side)),
+    back: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.back)),
+    close: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.close)),
+    grid: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.grid)),
+    video: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.video)),
   };
 
   return {
@@ -915,8 +1003,20 @@ app.get("/api/baserow/diagnose", async (req, res) => {
       try {
         const { approvedRows, fieldMap } = await fetchApprovedForTable(tableConfig);
         const validation = validateTableFields(tableConfig, fieldMap);
+        const mediaFields = detectMediaFields(fieldMap);
+        const mediaWarnings = [];
+        const isSuitTable = /suits?/i.test(tableConfig.name);
+
+        if (isSuitTable) {
+          if (!mediaFields.referenceMediaFields.fullSuit) mediaWarnings.push("Full Suit Image field was not found.");
+          if (!mediaFields.referenceMediaFields.suitBack) mediaWarnings.push("Back Image field was not found.");
+        } else if (!mediaFields.generatedMediaFields.close) {
+          mediaWarnings.push("Closeup View field or closeup alias was not found.");
+        }
+
         tables.push({
           name: tableConfig.name,
+          collection: tableConfig.name,
           tableId: tableConfig.tableId,
           readAccess: true,
           approvedRows: approvedRows.length,
@@ -924,12 +1024,16 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
           liveFields: validation.fields,
-          warnings: validation.warnings,
+          generatedMediaFields: mediaFields.generatedMediaFields,
+          referenceMediaFields: mediaFields.referenceMediaFields,
+          sampleMediaAvailability: sampleMediaAvailability(approvedRows.slice(0, 100), tableConfig, fieldMap),
+          warnings: [...validation.warnings, ...mediaWarnings],
           error: null,
         });
       } catch (error) {
         tables.push({
           name: tableConfig.name,
+          collection: tableConfig.name,
           tableId: tableConfig.tableId,
           readAccess: false,
           approvedRows: 0,
@@ -937,6 +1041,9 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
           liveFields: null,
+          generatedMediaFields: null,
+          referenceMediaFields: null,
+          sampleMediaAvailability: null,
           warnings: [],
           error: error.baserow || error.message,
         });

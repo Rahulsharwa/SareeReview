@@ -607,8 +607,14 @@
       z-index: 2;
     }
 
-    .thumb-strip,
     .generated-thumb-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .thumb-strip {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
@@ -657,6 +663,19 @@
       object-fit: contain;
       background: #17110d;
       border-radius: inherit;
+    }
+
+    .video-preview,
+    .video-preview video,
+    .generated-thumb video {
+      width: 100%;
+      height: 100%;
+    }
+
+    .video-preview video,
+    .generated-thumb video {
+      object-fit: contain;
+      background: #fffaf2;
     }
 
     .reference-grid {
@@ -1110,6 +1129,10 @@
       .reference-grid, .compare-grid, .modal-grid { grid-template-columns: 1fr; }
       .hero-preview, .compare-img { height: 330px; }
       .thumb-strip { grid-template-columns: repeat(3, 1fr); }
+      .generated-thumb-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .generated-thumb-media { height: 76px; }
+      .mini-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+      .mini-tab { white-space: nowrap; }
       .action-bar { grid-template-columns: 1fr 1fr; }
       .note-input { grid-column: 1 / -1; }
       .product-card { grid-template-columns: 1fr; }
@@ -1472,12 +1495,17 @@
       { label: 'Video', key: 'video', type: 'video', shortLabel: 'Video' }
     ];
 
-    const refMap = {
-      'Full Saree': 'full',
-      'Blouse': 'blouse',
-      'Pallu': 'pallu',
-      'Border': 'border'
-    };
+    const SAREE_REFERENCE_MEDIA = [
+      { label: 'Full Saree Image', key: 'full', type: 'image' },
+      { label: 'Blouse Image', key: 'blouse', type: 'image' },
+      { label: 'Pallu Image', key: 'pallu', type: 'image' },
+      { label: 'Border Image', key: 'border', type: 'image' }
+    ];
+
+    const SUIT_REFERENCE_MEDIA = [
+      { label: 'Full Suit Image', key: 'fullSuit', type: 'image' },
+      { label: 'Back Image', key: 'suitBack', type: 'image' }
+    ];
 
     function formatPrice(value) {
       return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
@@ -1577,6 +1605,14 @@
       return makeZoomable(src, label);
     }
 
+    function renderMediaPreview(url, label, type = 'image') {
+      if (!url) return '<div class="empty-img">Media not available</div>';
+      if (type === 'video') {
+        return `<div class="video-preview"><video controls preload="metadata"><source src="${url}">Your browser does not support the video tag.</video></div>`;
+      }
+      return makeZoomable(url, label);
+    }
+
     function makeMediaThumb(src, label, type = 'image') {
       if (!src) return `<div class="empty-img">Media not available</div>`;
       if (type === 'video') {
@@ -1587,6 +1623,20 @@
 
     function wireMagnifiers() {
       // Magnifier lens removed. Resize/zoom modal remains active through the in-image ⛶ button.
+    }
+
+    function isSuitProduct(product) {
+      const category = String(product?.category || '').toLowerCase();
+      return (
+        category.includes('cotton suits') ||
+        category.includes('silk suits') ||
+        category.includes('suit') ||
+        category.includes('salwar')
+      );
+    }
+
+    function referenceMediaForProduct(product) {
+      return isSuitProduct(product) ? SUIT_REFERENCE_MEDIA : SAREE_REFERENCE_MEDIA;
     }
 
     function renderCategories() {
@@ -1709,10 +1759,11 @@
 
     function renderReferences(p) {
       const grid = document.getElementById('referenceGrid');
-      grid.innerHTML = Object.entries(refMap).map(([label, key]) => `
+      const refs = referenceMediaForProduct(p);
+      grid.innerHTML = refs.map(ref => `
         <div class="ref-card">
-          <div class="ref-img zoom-wrap">${makeZoomable(p.images[key], label)}</div>
-          <div class="ref-label">${label} Image</div>
+          <div class="ref-img zoom-wrap">${renderMediaPreview(p.images?.[ref.key], ref.label, ref.type)}</div>
+          <div class="ref-label">${ref.label}</div>
         </div>
       `).join('');
     }
@@ -1721,22 +1772,29 @@
       const refSel = document.getElementById('referenceSelect');
       const genSel = document.getElementById('generatedSelect');
       const available = availableGenerated(p);
+      const refs = referenceMediaForProduct(p);
+      let selectedRef = refs.find(item => item.label === state.selectedReference);
+      if (!selectedRef && refs.length) {
+        selectedRef = refs[0];
+        state.selectedReference = selectedRef.label;
+      }
       let selected = available.find(item => item.label === state.selectedGenerated);
       if (!selected && available.length) {
         selected = available[0];
         state.selectedGenerated = selected.label;
       }
-      refSel.innerHTML = Object.keys(refMap).map(label => `<option ${label === state.selectedReference ? 'selected' : ''}>${label}</option>`).join('');
+      refSel.innerHTML = refs.map(ref => `<option ${ref.label === state.selectedReference ? 'selected' : ''}>${ref.label}</option>`).join('');
       genSel.innerHTML = available.map(item => `<option ${item.label === state.selectedGenerated ? 'selected' : ''}>${item.label}</option>`).join('');
-      const refSrc = p.images[refMap[state.selectedReference]];
+      const refSrc = selectedRef ? p.images?.[selectedRef.key] : null;
       const genSrc = selected ? p.images[selected.key] : null;
-      document.getElementById('compareRefTitle').textContent = `Reference - ${state.selectedReference}`;
+      document.getElementById('compareRefTitle').textContent = selectedRef ? `Reference - ${selectedRef.label}` : 'Reference';
       document.getElementById('compareGenTitle').textContent = selected ? `Generated - ${selected.label}` : 'Generated Output';
-      document.getElementById('compareRef').innerHTML = makeZoomable(refSrc, `Reference ${state.selectedReference}`);
+      document.getElementById('compareRef').innerHTML = selectedRef ? renderMediaPreview(refSrc, `Reference ${selectedRef.label}`, selectedRef.type) : '<div class="empty-img">Media not available</div>';
       document.getElementById('compareGen').innerHTML = selected ? makeMedia(genSrc, `Generated ${selected.label}`, selected.type) : '<div class="empty-img">No generated output available</div>';
     }
 
     function renderMobile(p) {
+      const refs = referenceMediaForProduct(p);
       document.getElementById('mobilePreview').innerHTML = `
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
@@ -1747,7 +1805,7 @@
         </div>
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
-          <div class="phone-card"><div class="phone-ref">${Object.entries(refMap).map(([label,key]) => `<div class="ref-card"><div class="ref-img zoom-wrap">${makeZoomable(p.images[key], label)}</div><div class="ref-label">${label}</div></div>`).join('')}</div></div>
+          <div class="phone-card"><div class="phone-ref">${refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('')}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
         </div>
       `;
