@@ -301,6 +301,47 @@
 
     .tab.active .count { background: rgba(255,255,255,.18); color: white; }
 
+    .category-group-tab {
+      border-color: rgba(198, 155, 82, .72);
+      background: linear-gradient(180deg, #fff7e6 0%, #f8ead2 100%);
+      color: var(--maroon);
+      box-shadow: inset 0 0 0 1px rgba(198, 155, 82, .18);
+    }
+
+    .category-group-tab::before {
+      content: "Group";
+      padding: 4px 7px;
+      border-radius: 999px;
+      background: rgba(198, 155, 82, .18);
+      color: #7f541b;
+      font-size: 10px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .category-child-tab {
+      padding: 13px 18px;
+      border-color: rgba(198, 155, 82, .38);
+      background: #fffdf8;
+      color: #5f3d27;
+      font-size: 13px;
+    }
+
+    .category-child-tab::before {
+      content: "↳";
+      color: var(--gold);
+      font-weight: 950;
+    }
+
+    .category-child-tab.active {
+      background: var(--maroon);
+      color: white;
+      border-color: var(--gold);
+    }
+
+    .category-child-tab.active::before { color: #f4d68a; }
+
     .toolbar {
       display: grid;
       grid-template-columns: minmax(260px, 1.3fr) .9fr .8fr .8fr auto;
@@ -1240,15 +1281,48 @@
       { name: "Gadwal Handloom", tableId: 935213 },
       { name: "Jamawar Silk Sarees", tableId: 935214 },
       { name: "Cotton Saree", tableId: 935216 },
+      { name: "Cotton Suits", tableId: 936059 },
+      { name: "Silk Suits", tableId: 936060 },
       { name: "Linen & Kota Silk Sarees", tableId: 935217 },
       { name: "Art Silk Sarees", tableId: 935218 },
-      { name: "Bandhani Silk", tableId: 935212 }
+      { name: "Bandhani Silk Saree", tableId: 935212 }
     ];
 
-    const categories = SAREE_TABLES.map(table => table.name);
+    const CATEGORY_GROUPS = [
+      {
+        name: 'Saree Collections',
+        children: [
+          'Kanjivaram Silks',
+          'Pure Silk Sarees',
+          'Tussar Silk Saree',
+          'South Weaves - South Silk Sarees',
+          'Soft Silk Sarees',
+          'Patola & Orissa Silk Sarees',
+          'Printed Pure Silk Sarees',
+          'Cotton Silk Sarees',
+          'Paithani Silk Sarees',
+          'Banarasi Georgette Silk Sarees',
+          'Banarasi Silk Sarees',
+          'Banarasi Kora Silk Saree',
+          'Gadwal Handloom',
+          'Jamawar Silk Sarees',
+          'Cotton Saree',
+          'Linen & Kota Silk Sarees',
+          'Art Silk Sarees',
+          'Bandhani Silk Saree'
+        ]
+      },
+      {
+        name: 'Salwar Kameez',
+        children: ['Cotton Suits', 'Silk Suits']
+      }
+    ];
+
+    const tableByName = new Map(SAREE_TABLES.map(table => [table.name, table]));
     let products = [];
     let collectionCounts = new Map();
     let isFetchingProducts = false;
+    let pendingFetchOptions = null;
 
     async function fetchCollections() {
       try {
@@ -1270,7 +1344,10 @@
     }
 
     async function fetchProductsFromAPI(options = {}) {
-      if (isFetchingProducts) return;
+      if (isFetchingProducts) {
+        pendingFetchOptions = { ...pendingFetchOptions, ...options };
+        return;
+      }
       isFetchingProducts = true;
 
       try {
@@ -1328,6 +1405,11 @@
         });
       } finally {
         isFetchingProducts = false;
+        if (pendingFetchOptions) {
+          const nextOptions = pendingFetchOptions;
+          pendingFetchOptions = null;
+          fetchProductsFromAPI(nextOptions);
+        }
       }
     }
 
@@ -1389,9 +1471,50 @@
       return products.find(p => p.id === state.selectedProductId) || products[0] || null;
     }
 
+    function escapeJs(value) {
+      return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    function getCategoryChildren(categoryName) {
+      const group = CATEGORY_GROUPS.find(group => group.name === categoryName);
+      return group ? group.children : [];
+    }
+
+    function isProductInSelectedCategory(product, selectedCategory) {
+      if (selectedCategory === 'All Collections') return true;
+
+      const children = getCategoryChildren(selectedCategory);
+      if (children.length) {
+        return children.includes(product.category);
+      }
+
+      return product.category === selectedCategory;
+    }
+
+    function getCategoryCount(categoryName) {
+      if (categoryName === 'All Collections') return collectionCounts.get('all') || products.length;
+
+      const children = getCategoryChildren(categoryName);
+      if (children.length) {
+        return children.reduce((sum, childName) => {
+          const childTable = tableByName.get(childName);
+          const apiCount = childTable ? collectionCounts.get(String(childTable.tableId)) : null;
+          return sum + (apiCount ?? products.filter(product => product.category === childName).length);
+        }, 0);
+      }
+
+      const table = tableByName.get(categoryName);
+      if (table && collectionCounts.has(String(table.tableId))) {
+        return collectionCounts.get(String(table.tableId));
+      }
+
+      return products.filter(product => product.category === categoryName).length;
+    }
+
     function filteredProducts() {
       const q = document.getElementById('searchInput')?.value?.toLowerCase() || '';
-      let list = Array.isArray(products) ? [...products] : [];
+      let list = (Array.isArray(products) ? [...products] : [])
+        .filter(product => isProductInSelectedCategory(product, state.selectedCategory));
 
       if (q) {
         list = list.filter(p =>
@@ -1417,7 +1540,7 @@
     }
 
     function makeZoomable(src, label, className = 'fit-img') {
-      if (!src) return `<div class="empty-img">No image found</div>`;
+      if (!src) return `<div class="empty-img">Media not available</div>`;
 
       const safeSrc = String(src).replace(/'/g, "%27");
       const safeLabel = String(label || 'Image preview').replace(/'/g, "\\'");
@@ -1431,7 +1554,7 @@
     }
 
     function makeMedia(src, label, type = 'image') {
-      if (!src) return `<div class="empty-img">No media found</div>`;
+      if (!src) return `<div class="empty-img">Media not available</div>`;
       if (type === 'video') {
         return `<video src="${src}" class="fit-img" controls preload="metadata"></video>`;
       }
@@ -1447,21 +1570,32 @@
       const sel = document.getElementById('categorySelect');
       tabs.innerHTML = '';
       sel.innerHTML = '';
-      SAREE_TABLES.forEach(table => {
-        const tableKey = String(table.tableId);
-        const count = collectionCounts.has(tableKey)
-          ? collectionCounts.get(tableKey)
-          : (tableKey === 'all' ? products.length : products.filter(p => String(p.tableId) === tableKey).length);
-        tabs.insertAdjacentHTML('beforeend', `<button class="tab ${String(state.selectedTableId) === tableKey ? 'active' : ''}" onclick="selectCategory('${table.name.replace(/'/g, "\\'")}', '${tableKey}')">${table.name}<span class="count">${count}</span></button>`);
-        sel.insertAdjacentHTML('beforeend', `<option value="${tableKey}" ${String(state.selectedTableId) === tableKey ? 'selected' : ''}>${table.name}</option>`);
+
+      tabs.insertAdjacentHTML('beforeend', `<button class="tab ${state.selectedCategory === 'All Collections' ? 'active' : ''}" onclick="selectCategory('All Collections')">All Collections<span class="count">${getCategoryCount('All Collections')}</span></button>`);
+      sel.insertAdjacentHTML('beforeend', `<option value="All Collections" ${state.selectedCategory === 'All Collections' ? 'selected' : ''}>All Collections</option>`);
+
+      CATEGORY_GROUPS.forEach(group => {
+        if (group.name !== 'Saree Collections') {
+          tabs.insertAdjacentHTML('beforeend', `<button class="tab category-group-tab ${state.selectedCategory === group.name ? 'active' : ''}" onclick="selectCategory('${escapeJs(group.name)}')">${group.name}<span class="count">${getCategoryCount(group.name)}</span></button>`);
+          sel.insertAdjacentHTML('beforeend', `<option value="${group.name}" ${state.selectedCategory === group.name ? 'selected' : ''}>${group.name}</option>`);
+        }
+
+        group.children.forEach(childName => {
+          const tabClass = group.name === 'Salwar Kameez' ? 'category-child-tab' : '';
+          const optionLabel = group.name === 'Salwar Kameez' ? `-- ${childName}` : childName;
+          tabs.insertAdjacentHTML('beforeend', `<button class="tab ${tabClass} ${state.selectedCategory === childName ? 'active' : ''}" onclick="selectCategory('${escapeJs(childName)}')">${childName}<span class="count">${getCategoryCount(childName)}</span></button>`);
+          sel.insertAdjacentHTML('beforeend', `<option value="${childName}" ${state.selectedCategory === childName ? 'selected' : ''}>${optionLabel}</option>`);
+        });
       });
+
       document.getElementById('totalCount').textContent = filteredProducts().length;
     }
 
-    function selectCategory(cat, tableId = 'all') {
+    function selectCategory(cat) {
       state.selectedCategory = cat;
       state.selectedCollectionName = cat;
-      state.selectedTableId = String(tableId);
+      const table = tableByName.get(cat);
+      state.selectedTableId = table && !getCategoryChildren(cat).length ? String(table.tableId) : 'all';
       state.selectedProductId = null;
       fetchProductsFromAPI();
     }
@@ -1926,8 +2060,7 @@
     document.getElementById('backMainBtn').addEventListener('click', backToMainMenu);
     document.getElementById('detailBtn').addEventListener('click', () => { state.view = 'detail'; renderAll(false); });
     document.getElementById('categorySelect').addEventListener('change', e => {
-      const table = SAREE_TABLES.find(item => String(item.tableId) === String(e.target.value)) || SAREE_TABLES[0];
-      selectCategory(table.name, table.tableId);
+      selectCategory(e.target.value);
     });
     let searchDebounce;
     document.getElementById('searchInput').addEventListener('input', () => {
