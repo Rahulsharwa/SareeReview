@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { Redis } from "@upstash/redis";
 
 dotenv.config();
 
@@ -15,6 +16,10 @@ const __dirname = path.dirname(__filename);
 const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
 const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
+const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
+const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_PRODUCTS_TTL || 60);
+const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_COLLECTIONS_TTL || 180);
+const CACHE_FIELDS_TTL = Number(process.env.CACHE_FIELDS_TTL || 86400);
 
 const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
@@ -239,6 +244,132 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const fieldMapCache = new Map();
+const memoryCache = new Map();
+const redis = CACHE_ENABLED && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  ? new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    })
+  : null;
+const cacheStats = {
+  hits: 0,
+  misses: 0,
+  sets: 0,
+  deletes: 0,
+  errors: 0,
+};
+
+function cacheProvider() {
+  if (!CACHE_ENABLED) return "disabled";
+  return redis ? "upstash" : "memory";
+}
+
+function cacheKey(...parts) {
+  return ["jsh-review", BASEROW_DATABASE_ID, ...parts].map((part) => String(part)).join(":");
+}
+
+function stableQueryKey(query) {
+  return Object.entries(query || {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join("&") || "all";
+}
+
+function getMemoryCache(key) {
+  const item = memoryCache.get(key);
+  if (!item) return null;
+  if (item.expiresAt <= Date.now()) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return item.value;
+}
+
+function setMemoryCache(key, value, ttlSeconds) {
+  memoryCache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlSeconds * 1000,
+  });
+}
+
+async function cacheGet(key) {
+  if (!CACHE_ENABLED) return null;
+  try {
+    const value = redis ? await redis.get(key) : getMemoryCache(key);
+    if (value === null || value === undefined) {
+      cacheStats.misses += 1;
+      return null;
+    }
+    cacheStats.hits += 1;
+    return value;
+  } catch (error) {
+    cacheStats.errors += 1;
+    console.warn("Cache get failed:", error.message);
+    return null;
+  }
+}
+
+async function cacheSet(key, value, ttlSeconds) {
+  if (!CACHE_ENABLED) return;
+  try {
+    if (redis) {
+      await redis.set(key, value, { ex: ttlSeconds });
+    } else {
+      setMemoryCache(key, value, ttlSeconds);
+    }
+    cacheStats.sets += 1;
+  } catch (error) {
+    cacheStats.errors += 1;
+    console.warn("Cache set failed:", error.message);
+  }
+}
+
+async function cacheDelete(keys) {
+  if (!CACHE_ENABLED) return;
+  const list = Array.isArray(keys) ? keys.filter(Boolean) : [keys].filter(Boolean);
+  if (!list.length) return;
+  try {
+    if (redis) {
+      await redis.del(...list);
+    } else {
+      list.forEach((key) => memoryCache.delete(key));
+    }
+    cacheStats.deletes += list.length;
+  } catch (error) {
+    cacheStats.errors += 1;
+    console.warn("Cache delete failed:", error.message);
+  }
+}
+
+async function cacheDeleteByPrefix(prefix) {
+  if (!CACHE_ENABLED) return;
+  try {
+    if (redis) {
+      let cursor = 0;
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, { match: `${prefix}*`, count: 100 });
+        cursor = Number(nextCursor);
+        if (keys.length) await redis.del(...keys);
+      } while (cursor !== 0);
+    } else {
+      for (const key of memoryCache.keys()) {
+        if (key.startsWith(prefix)) memoryCache.delete(key);
+      }
+    }
+  } catch (error) {
+    cacheStats.errors += 1;
+    console.warn("Cache prefix delete failed:", error.message);
+  }
+}
+
+async function invalidateProductCache(tableId = null) {
+  await Promise.all([
+    cacheDelete(cacheKey("collections", "all")),
+    cacheDeleteByPrefix(cacheKey("products")),
+    tableId ? cacheDelete(cacheKey("table", tableId, "approved")) : Promise.resolve(),
+  ]);
+}
 
 function assertConfig() {
   if (!BASEROW_TOKEN) {
@@ -368,6 +499,17 @@ async function fetchFieldMap(tableId) {
     return fieldMapCache.get(String(tableId));
   }
 
+  const fieldsCacheKey = cacheKey("fields", tableId);
+  const cachedFields = await cacheGet(fieldsCacheKey);
+  if (Array.isArray(cachedFields)) {
+    const fieldMap = {
+      byName: new Map(cachedFields.map((field) => [field.name, `field_${field.id}`])),
+      fields: cachedFields,
+    };
+    fieldMapCache.set(String(tableId), fieldMap);
+    return fieldMap;
+  }
+
   const { response, data } = await fetchBaserowJsonWithRetry(`${BASEROW_API_URL}/api/database/fields/table/${tableId}/`, {
     headers: {
       Authorization: `Token ${BASEROW_TOKEN}`,
@@ -391,6 +533,7 @@ async function fetchFieldMap(tableId) {
     fields,
   };
   fieldMapCache.set(String(tableId), fieldMap);
+  await cacheSet(fieldsCacheKey, fields, CACHE_FIELDS_TTL);
   return fieldMap;
 }
 
@@ -669,18 +812,34 @@ async function fetchBaserowRows(tableId) {
 }
 
 async function fetchApprovedForTable(tableConfig) {
+  const approvedCacheKey = cacheKey("table", tableConfig.tableId, "approved");
+  const cached = await cacheGet(approvedCacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      fieldMap: await fetchFieldMap(tableConfig.tableId),
+    };
+  }
+
   const [rows, fieldMap] = await Promise.all([
     fetchBaserowRows(tableConfig.tableId),
     fetchFieldMap(tableConfig.tableId),
   ]);
   const approvedRows = rows.filter((row) => isApprovedGeneration(row, tableConfig, fieldMap));
-  return {
+  const result = {
     tableConfig,
     rows,
     fieldMap,
     approvedRows,
     products: approvedRows.map((row) => normalizeProduct(row, tableConfig, fieldMap)),
   };
+  await cacheSet(approvedCacheKey, {
+    tableConfig,
+    rows,
+    approvedRows,
+    products: result.products,
+  }, CACHE_PRODUCTS_TTL);
+  return result;
 }
 
 async function mapWithConcurrency(items, limit, worker) {
@@ -783,7 +942,7 @@ app.get("/api/health", (req, res) => {
   }
 });
 
-app.get("/api/collections", async (req, res) => {
+async function buildCollectionsPayload() {
   const collections = [];
   const errors = [];
 
@@ -813,83 +972,116 @@ app.get("/api/collections", async (req, res) => {
     SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
   );
 
-  res.json({
+  return {
     success: true,
     total: collections.reduce((sum, item) => sum + item.count, 0),
     collections,
     errors,
+  };
+}
+
+async function buildProductsPayload(query = {}) {
+  const { tableId, collection, search, status, sort } = query;
+  let tablesToFetch = SAREE_TABLES;
+  let mode = "all-tables";
+
+  if (tableId) {
+    const tableConfig = getTableConfig(tableId);
+    if (!tableConfig) {
+      const error = new Error(`Unknown tableId ${tableId}`);
+      error.status = 400;
+      throw error;
+    }
+    tablesToFetch = [tableConfig];
+    mode = "table";
+  } else if (collection) {
+    const tableConfig = getTableConfigByName(collection);
+    if (!tableConfig) {
+      const error = new Error(`Unknown collection ${collection}`);
+      error.status = 400;
+      throw error;
+    }
+    tablesToFetch = [tableConfig];
+    mode = "collection";
+  }
+
+  const products = [];
+  const collections = [];
+  const errors = [];
+
+  await mapWithConcurrency(tablesToFetch, 4, async (tableConfig) => {
+    try {
+      const result = await fetchApprovedForTable(tableConfig);
+      products.push(...result.products);
+      collections.push({
+        name: tableConfig.name,
+        tableId: tableConfig.tableId,
+        count: result.products.length,
+        error: null,
+      });
+    } catch (error) {
+      const item = {
+        name: tableConfig.name,
+        tableId: tableConfig.tableId,
+        count: 0,
+        error: error.baserow || error.message,
+      };
+      collections.push(item);
+      errors.push(item);
+    }
   });
+
+  collections.sort((a, b) =>
+    SAREE_TABLES.findIndex((table) => table.tableId === a.tableId) -
+    SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
+  );
+
+  const filteredProducts = applyProductFilters(products, { search, status, sort });
+
+  return {
+    success: true,
+    count: filteredProducts.length,
+    products: filteredProducts,
+    collections,
+    errors,
+    debug: {
+      mode,
+      totalTables: tablesToFetch.length,
+      successfulTables: collections.filter((item) => !item.error).length,
+      failedTables: errors.length,
+      filter: "Generation Status = Approved",
+    },
+  };
+}
+
+app.get("/api/collections", async (req, res) => {
+  try {
+    const key = cacheKey("collections", "all");
+    const cached = await cacheGet(key);
+    if (cached) {
+      return res.json({ ...cached, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_COLLECTIONS_TTL } });
+    }
+
+    const payload = await buildCollectionsPayload();
+    await cacheSet(key, payload, CACHE_COLLECTIONS_TTL);
+    res.json({ ...payload, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_COLLECTIONS_TTL } });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ success: false, error: error.message });
+  }
 });
 
 app.get("/api/products", async (req, res) => {
   try {
-    const { tableId, collection, search, status, sort } = req.query;
-    let tablesToFetch = SAREE_TABLES;
-    let mode = "all-tables";
-
-    if (tableId) {
-      const tableConfig = getTableConfig(tableId);
-      if (!tableConfig) {
-        return res.status(400).json({ success: false, error: `Unknown tableId ${tableId}` });
-      }
-      tablesToFetch = [tableConfig];
-      mode = "table";
-    } else if (collection) {
-      const tableConfig = getTableConfigByName(collection);
-      if (!tableConfig) {
-        return res.status(400).json({ success: false, error: `Unknown collection ${collection}` });
-      }
-      tablesToFetch = [tableConfig];
-      mode = "collection";
+    const key = cacheKey("products", stableQueryKey(req.query));
+    const cached = await cacheGet(key);
+    if (cached) {
+      return res.json({ ...cached, debug: { ...cached.debug, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_PRODUCTS_TTL } } });
     }
 
-    const products = [];
-    const collections = [];
-    const errors = [];
-
-    await mapWithConcurrency(tablesToFetch, 4, async (tableConfig) => {
-      try {
-        const result = await fetchApprovedForTable(tableConfig);
-        products.push(...result.products);
-        collections.push({
-          name: tableConfig.name,
-          tableId: tableConfig.tableId,
-          count: result.products.length,
-          error: null,
-        });
-      } catch (error) {
-        const item = {
-          name: tableConfig.name,
-          tableId: tableConfig.tableId,
-          count: 0,
-          error: error.baserow || error.message,
-        };
-        collections.push(item);
-        errors.push(item);
-      }
-    });
-
-    collections.sort((a, b) =>
-      SAREE_TABLES.findIndex((table) => table.tableId === a.tableId) -
-      SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
-    );
-
-    const filteredProducts = applyProductFilters(products, { search, status, sort });
-
-    res.json({
-      success: true,
-      count: filteredProducts.length,
-      products: filteredProducts,
-      collections,
-      errors,
-      debug: {
-        mode,
-        totalTables: tablesToFetch.length,
-        successfulTables: collections.filter((item) => !item.error).length,
-        failedTables: errors.length,
-        filter: "Generation Status = Approved",
-      },
-    });
+    const payload = await buildProductsPayload(req.query);
+    await cacheSet(key, payload, CACHE_PRODUCTS_TTL);
+    res.json({ ...payload, debug: { ...payload.debug, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_PRODUCTS_TTL } } });
   } catch (error) {
     console.error(error);
     res.status(error.status || 500).json({ success: false, error: error.message });
@@ -904,6 +1096,7 @@ app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
 
     const updatedRow = await patchBaserowRow(tableId, rowId, buildApprovePayload(tableConfig));
     const fieldMap = await fetchFieldMap(tableId);
+    await invalidateProductCache(tableId);
 
     res.json({
       success: true,
@@ -931,6 +1124,7 @@ app.patch("/api/products/:tableId/:rowId/request-changes", async (req, res) => {
     const finalComment = `Change Type: ${changeType}\n\n${feedbackText}`;
     const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, finalComment));
     const fieldMap = await fetchFieldMap(tableId);
+    await invalidateProductCache(tableId);
 
     res.json({
       success: true,
@@ -957,6 +1151,7 @@ app.patch("/api/products/:tableId/:rowId/reject", async (req, res) => {
     const feedbackText = feedback || comment || "Rejected from review portal";
     const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, feedbackText));
     const fieldMap = await fetchFieldMap(tableId);
+    await invalidateProductCache(tableId);
 
     res.json({
       success: true,
@@ -992,6 +1187,54 @@ app.patch("/api/products/:rowId/reject", (req, res) => {
     success: false,
     error: "Legacy route cannot update multi-table rows. Use /api/products/:tableId/:rowId/reject.",
   });
+});
+
+app.get("/api/cache/status", (req, res) => {
+  res.json({
+    success: true,
+    enabled: CACHE_ENABLED,
+    provider: cacheProvider(),
+    ttlSeconds: {
+      products: CACHE_PRODUCTS_TTL,
+      collections: CACHE_COLLECTIONS_TTL,
+      fields: CACHE_FIELDS_TTL,
+    },
+    memoryKeys: redis ? undefined : memoryCache.size,
+    stats: cacheStats,
+  });
+});
+
+app.post("/api/cache/refresh", async (req, res) => {
+  try {
+    await invalidateProductCache();
+
+    const [collections, products] = await Promise.all([
+      buildCollectionsPayload(),
+      buildProductsPayload({}),
+    ]);
+
+    await Promise.all([
+      cacheSet(cacheKey("collections", "all"), collections, CACHE_COLLECTIONS_TTL),
+      cacheSet(cacheKey("products", stableQueryKey({})), products, CACHE_PRODUCTS_TTL),
+    ]);
+
+    res.json({
+      success: true,
+      provider: cacheProvider(),
+      refreshed: {
+        collections: collections.collections.length,
+        products: products.count,
+      },
+      ttlSeconds: {
+        products: CACHE_PRODUCTS_TTL,
+        collections: CACHE_COLLECTIONS_TTL,
+        fields: CACHE_FIELDS_TTL,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(error.status || 500).json({ success: false, error: error.message });
+  }
 });
 
 app.get("/api/baserow/diagnose", async (req, res) => {

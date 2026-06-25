@@ -1452,6 +1452,20 @@
       }
     }
 
+    async function refreshCacheAndProducts() {
+      try {
+        await fetch('/api/cache/refresh', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+      } catch (error) {
+        console.warn('Cache refresh skipped:', error.message);
+      }
+
+      fetchProductsFromAPI({ showToast: true });
+    }
+
     function renderErrorPanel(errData) {
       products = [];
       const fixSteps = Array.isArray(errData.fix)
@@ -2172,7 +2186,7 @@
     document.getElementById('referenceSelect').addEventListener('change', e => { state.selectedReference = e.target.value; renderAll(false); });
     document.getElementById('generatedSelect').addEventListener('change', e => { state.selectedGenerated = e.target.value; renderAll(false); });
     document.getElementById('changeComment').addEventListener('input', e => document.getElementById('charCount').textContent = e.target.value.length);
-    document.getElementById('refreshBtn').addEventListener('click', () => fetchProductsFromAPI({ showToast: true }));
+    document.getElementById('refreshBtn').addEventListener('click', refreshCacheAndProducts);
     setInterval(() => fetchProductsFromAPI(), 15000);
 
     fetchCollections().finally(() => fetchProductsFromAPI());
