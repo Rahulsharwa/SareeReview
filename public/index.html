@@ -1170,7 +1170,7 @@
     <section class="section-card section-pad">
       <div class="collection-head">
         <span>Collections Category Filter</span>
-        <span class="collection-count"><span id="totalCount">0</span> saree listings available</span>
+        <span class="collection-count"><span id="totalCount">0</span> listings available</span>
       </div>
       <div class="tabs" id="categoryTabs"></div>
     </section>
@@ -1494,6 +1494,7 @@
       selectedCategory: 'All Collections',
       selectedTableId: 'all',
       selectedCollectionName: 'All Collections',
+      selectedCollection: { name: 'All Collections', tableId: 'all' },
       view: 'grid',
       selectedProductId: null,
       selectedGenerated: 'Front View',
@@ -1538,15 +1539,24 @@
       return group ? group.children : [];
     }
 
-    function isProductInSelectedCategory(product, selectedCategory) {
-      if (selectedCategory === 'All Collections') return true;
+    function productMatchesCollection(product, selectedCollection) {
+      if (!selectedCollection || selectedCollection.name === 'All Collections') return true;
 
-      const children = getCategoryChildren(selectedCategory);
-      if (children.length) {
-        return children.includes(product.category);
+      if (selectedCollection.name === 'Salwar Kameez') {
+        return [936059, 936060].includes(Number(product.tableId)) ||
+          ['Cotton Suits', 'Silk Suits'].includes(product.collectionName) ||
+          ['Cotton Suits', 'Silk Suits'].includes(product.category);
       }
 
-      return product.category === selectedCategory;
+      if (selectedCollection.tableId && selectedCollection.tableId !== 'all') {
+        return Number(product.tableId) === Number(selectedCollection.tableId);
+      }
+
+      const selectedName = String(selectedCollection.name || '').trim().toLowerCase();
+      return (
+        String(product.collectionName || '').trim().toLowerCase() === selectedName ||
+        String(product.category || '').trim().toLowerCase() === selectedName
+      );
     }
 
     function getCategoryCount(categoryName) {
@@ -1572,7 +1582,7 @@
     function filteredProducts() {
       const q = document.getElementById('searchInput')?.value?.toLowerCase() || '';
       let list = (Array.isArray(products) ? [...products] : [])
-        .filter(product => isProductInSelectedCategory(product, state.selectedCategory));
+        .filter(product => productMatchesCollection(product, state.selectedCollection));
 
       if (q) {
         list = list.filter(p =>
@@ -1684,6 +1694,7 @@
       state.selectedCollectionName = cat;
       const table = tableByName.get(cat);
       state.selectedTableId = table && !getCategoryChildren(cat).length ? String(table.tableId) : 'all';
+      state.selectedCollection = { name: cat, tableId: state.selectedTableId };
       state.selectedProductId = null;
       fetchProductsFromAPI();
     }
@@ -1858,6 +1869,9 @@
     function backToMainMenu() {
       state.view = 'grid';
       state.selectedCategory = 'All Collections';
+      state.selectedCollectionName = 'All Collections';
+      state.selectedTableId = 'all';
+      state.selectedCollection = { name: 'All Collections', tableId: 'all' };
 
       const searchInput = document.getElementById('searchInput');
       const categorySelect = document.getElementById('categorySelect');

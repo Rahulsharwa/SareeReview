@@ -20,6 +20,7 @@ const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
 const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${BASEROW_DATABASE_ID}:`;
+const CACHE_VERSION = "v2";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
 const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
@@ -314,7 +315,11 @@ function cacheProvider() {
 }
 
 function cacheKey(...parts) {
-  return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}`;
+  return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}:${CACHE_VERSION}`;
+}
+
+function legacyCacheKey(...parts) {
+  return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}:v1`;
 }
 
 function stableQueryKey(query) {
@@ -323,6 +328,12 @@ function stableQueryKey(query) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${String(value)}`)
     .join("&") || "all";
+}
+
+function productCacheKey(query = {}) {
+  if (query.tableId) return cacheKey("products", "table", query.tableId);
+  if (query.collection) return cacheKey("products", "collection", normalizeLookupName(query.collection));
+  return cacheKey("products", "all");
 }
 
 function getMemoryCache(key) {
@@ -435,10 +446,10 @@ async function cacheDeleteByPrefix(prefix) {
 
 async function invalidateProductCache(tableId = null) {
   await Promise.all([
-    cacheDelete(cacheKey("collections", "all")),
-    cacheDelete(cacheKey("diagnose", "all")),
-    cacheDeleteByPrefix(cacheKey("products")),
-    tableId ? cacheDelete(cacheKey("table", tableId, "approved")) : Promise.resolve(),
+    cacheDelete(cacheKey("collections")),
+    cacheDelete(cacheKey("diagnose")),
+    cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
+    tableId ? cacheDelete(cacheKey("products", "table-approved", tableId)) : Promise.resolve(),
   ]);
 }
 
@@ -455,7 +466,27 @@ function getTableConfig(tableId) {
 }
 
 function getTableConfigByName(name) {
-  return SAREE_TABLES.find((table) => table.name.toLowerCase() === String(name || "").toLowerCase());
+  const target = normalizeLookupName(name);
+  return SAREE_TABLES.find((table) => normalizeLookupName(table.name) === target);
+}
+
+function normalizeLookupName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function slugify(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function collectionGroupName(tableName) {
+  return ["Cotton Suits", "Silk Suits"].includes(tableName) ? "Salwar Kameez" : "Saree Collections";
 }
 
 function getSelectValue(value) {
@@ -570,7 +601,7 @@ async function fetchFieldMap(tableId) {
     return fieldMapCache.get(String(tableId));
   }
 
-  const fieldsCacheKey = cacheKey("fields", tableId);
+  const fieldsCacheKey = cacheKey("fields", "table", tableId);
   const cachedFields = await cacheGet(fieldsCacheKey);
   if (Array.isArray(cachedFields)) {
     const fieldMap = {
@@ -787,7 +818,7 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   };
 
   return {
-    id: `${tableConfig.tableId}-${row.id}`,
+    id: `${tableConfig.tableId}:${row.id}`,
     rowId: row.id,
     tableId: tableConfig.tableId,
     collectionName: tableConfig.name,
@@ -883,7 +914,7 @@ async function fetchBaserowRows(tableId) {
 }
 
 async function fetchApprovedForTable(tableConfig) {
-  const approvedCacheKey = cacheKey("table", tableConfig.tableId, "approved");
+  const approvedCacheKey = cacheKey("products", "table-approved", tableConfig.tableId);
   const cached = await cacheGet(approvedCacheKey);
   if (cached) {
     return {
@@ -1023,6 +1054,8 @@ async function buildCollectionsPayload() {
       collections.push({
         name: tableConfig.name,
         tableId: tableConfig.tableId,
+        slug: slugify(tableConfig.name),
+        group: collectionGroupName(tableConfig.name),
         count: approvedRows.length,
         error: null,
       });
@@ -1030,6 +1063,8 @@ async function buildCollectionsPayload() {
       const item = {
         name: tableConfig.name,
         tableId: tableConfig.tableId,
+        slug: slugify(tableConfig.name),
+        group: collectionGroupName(tableConfig.name),
         count: 0,
         error: error.baserow || error.message,
       };
@@ -1066,14 +1101,25 @@ async function buildProductsPayload(query = {}) {
     tablesToFetch = [tableConfig];
     mode = "table";
   } else if (collection) {
-    const tableConfig = getTableConfigByName(collection);
-    if (!tableConfig) {
+    if (normalizeLookupName(collection) === normalizeLookupName("Salwar Kameez")) {
+      tablesToFetch = [getTableConfig(936059), getTableConfig(936060)].filter(Boolean);
+      mode = "group";
+    } else {
+      const tableConfig = getTableConfigByName(collection);
+      if (!tableConfig) {
+        const error = new Error(`Unknown collection ${collection}`);
+        error.status = 400;
+        throw error;
+      }
+      tablesToFetch = [tableConfig];
+      mode = "collection";
+    }
+
+    if (!tablesToFetch.length) {
       const error = new Error(`Unknown collection ${collection}`);
       error.status = 400;
       throw error;
     }
-    tablesToFetch = [tableConfig];
-    mode = "collection";
   }
 
   const products = [];
@@ -1087,6 +1133,8 @@ async function buildProductsPayload(query = {}) {
       collections.push({
         name: tableConfig.name,
         tableId: tableConfig.tableId,
+        slug: slugify(tableConfig.name),
+        group: collectionGroupName(tableConfig.name),
         count: result.products.length,
         error: null,
       });
@@ -1094,6 +1142,8 @@ async function buildProductsPayload(query = {}) {
       const item = {
         name: tableConfig.name,
         tableId: tableConfig.tableId,
+        slug: slugify(tableConfig.name),
+        group: collectionGroupName(tableConfig.name),
         count: 0,
         error: error.baserow || error.message,
       };
@@ -1127,7 +1177,7 @@ async function buildProductsPayload(query = {}) {
 
 app.get("/api/collections", async (req, res) => {
   try {
-    const key = cacheKey("collections", "all");
+    const key = cacheKey("collections");
     const cached = await cacheGet(key);
     if (cached) {
       return res.json({ ...cached, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_COLLECTIONS_TTL } });
@@ -1144,7 +1194,7 @@ app.get("/api/collections", async (req, res) => {
 
 app.get("/api/products", async (req, res) => {
   try {
-    const key = cacheKey("products", stableQueryKey(req.query));
+    const key = productCacheKey(req.query);
     const cached = await cacheGet(key);
     if (cached) {
       return res.json({ ...cached, debug: { ...cached.debug, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_PRODUCTS_TTL } } });
@@ -1260,13 +1310,17 @@ app.patch("/api/products/:rowId/reject", (req, res) => {
   });
 });
 
-app.get("/api/cache/status", (req, res) => {
+app.get("/api/cache/status", async (req, res) => {
+  const cachedProducts = await cacheGet(productCacheKey({}));
+  const cachedCollections = await cacheGet(cacheKey("collections"));
+  const productSample = cachedProducts?.products?.[0] || null;
   res.json({
     success: true,
     enabled: CACHE_ENABLED,
     provider: cacheProvider(),
     connected: cacheConnected,
     fallback: cacheFallback,
+    version: CACHE_VERSION,
     ttlSeconds: {
       products: CACHE_PRODUCTS_TTL,
       collections: CACHE_COLLECTIONS_TTL,
@@ -1277,12 +1331,36 @@ app.get("/api/cache/status", (req, res) => {
     prefixConfigured: Boolean(CACHE_PREFIX),
     memoryKeys: memoryCache.size,
     stats: cacheStats,
+    debug: {
+      productsCacheKey: productCacheKey({}),
+      collectionsCacheKey: cacheKey("collections"),
+      productShapeSample: productSample ? {
+        tableId: productSample.tableId,
+        rowId: productSample.rowId,
+        code: productSample.code,
+        title: productSample.title,
+        category: productSample.category,
+        collectionName: productSample.collectionName,
+      } : null,
+      categoryMappings: SAREE_TABLES.map((table) => ({
+        name: table.name,
+        tableId: table.tableId,
+        count: cachedCollections?.collections?.find((item) => item.tableId === table.tableId)?.count ?? null,
+      })),
+    },
   });
 });
 
 app.post("/api/cache/refresh", async (req, res) => {
   try {
     await invalidateProductCache();
+    await Promise.all([
+      cacheDelete(legacyCacheKey("collections", "all")),
+      cacheDelete(legacyCacheKey("collections")),
+      cacheDelete(legacyCacheKey("diagnose", "all")),
+      cacheDelete(legacyCacheKey("diagnose")),
+      cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
+    ]);
 
     const [collections, products] = await Promise.all([
       buildCollectionsPayload(),
@@ -1290,8 +1368,8 @@ app.post("/api/cache/refresh", async (req, res) => {
     ]);
 
     await Promise.all([
-      cacheSet(cacheKey("collections", "all"), collections, CACHE_COLLECTIONS_TTL),
-      cacheSet(cacheKey("products", stableQueryKey({})), products, CACHE_PRODUCTS_TTL),
+      cacheSet(cacheKey("collections"), collections, CACHE_COLLECTIONS_TTL),
+      cacheSet(productCacheKey({}), products, CACHE_PRODUCTS_TTL),
     ]);
 
     res.json({
@@ -1316,7 +1394,7 @@ app.post("/api/cache/refresh", async (req, res) => {
 app.get("/api/baserow/diagnose", async (req, res) => {
   try {
     assertConfig();
-    const diagnoseCacheKey = cacheKey("diagnose", "all");
+    const diagnoseCacheKey = cacheKey("diagnose");
     const cached = await cacheGet(diagnoseCacheKey);
     if (cached) {
       return res.json({
