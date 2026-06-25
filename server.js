@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Redis } from "@upstash/redis";
+import { createClient } from "redis";
 
 dotenv.config();
 
@@ -17,9 +18,13 @@ const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
 const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
-const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_PRODUCTS_TTL || 60);
-const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_COLLECTIONS_TTL || 180);
-const CACHE_FIELDS_TTL = Number(process.env.CACHE_FIELDS_TTL || 86400);
+const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
+const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${BASEROW_DATABASE_ID}:`;
+const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
+const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
+const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
+const CACHE_DIAGNOSE_TTL = Number(process.env.CACHE_TTL_DIAGNOSE_SECONDS || 60);
+const CACHE_STALE_IF_ERROR = String(process.env.CACHE_STALE_IF_ERROR || "true").toLowerCase() !== "false";
 
 const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
@@ -245,12 +250,11 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const fieldMapCache = new Map();
 const memoryCache = new Map();
-const redis = CACHE_ENABLED && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    })
-  : null;
+let redisCloudClient = null;
+let upstashClient = null;
+let activeCacheProvider = CACHE_ENABLED ? "memory" : "disabled";
+let cacheConnected = false;
+let cacheFallback = CACHE_ENABLED ? "memory" : null;
 const cacheStats = {
   hits: 0,
   misses: 0,
@@ -259,13 +263,58 @@ const cacheStats = {
   errors: 0,
 };
 
+async function initializeCache() {
+  if (!CACHE_ENABLED) return;
+
+  if ((CACHE_PROVIDER === "redis" || (!CACHE_PROVIDER && process.env.REDIS_URL)) && process.env.REDIS_URL) {
+    try {
+      redisCloudClient = createClient({ url: process.env.REDIS_URL });
+      redisCloudClient.on("error", (error) => {
+        cacheStats.errors += 1;
+        cacheConnected = false;
+        activeCacheProvider = "memory";
+        cacheFallback = "memory";
+        console.warn("Redis cache connection warning:", error.message);
+      });
+      await redisCloudClient.connect();
+      activeCacheProvider = "redis";
+      cacheConnected = true;
+      cacheFallback = null;
+      return;
+    } catch (error) {
+      redisCloudClient = null;
+      activeCacheProvider = "memory";
+      cacheConnected = false;
+      cacheFallback = "memory";
+      cacheStats.errors += 1;
+      console.warn("Redis cache unavailable; using memory cache:", error.message);
+      return;
+    }
+  }
+
+  if ((CACHE_PROVIDER === "upstash" || (!CACHE_PROVIDER && process.env.UPSTASH_REDIS_REST_URL)) && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    upstashClient = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    activeCacheProvider = "upstash";
+    cacheConnected = true;
+    cacheFallback = null;
+    return;
+  }
+
+  activeCacheProvider = "memory";
+  cacheConnected = false;
+  cacheFallback = "memory";
+}
+
 function cacheProvider() {
   if (!CACHE_ENABLED) return "disabled";
-  return redis ? "upstash" : "memory";
+  return activeCacheProvider;
 }
 
 function cacheKey(...parts) {
-  return ["jsh-review", BASEROW_DATABASE_ID, ...parts].map((part) => String(part)).join(":");
+  return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}`;
 }
 
 function stableQueryKey(query) {
@@ -296,7 +345,15 @@ function setMemoryCache(key, value, ttlSeconds) {
 async function cacheGet(key) {
   if (!CACHE_ENABLED) return null;
   try {
-    const value = redis ? await redis.get(key) : getMemoryCache(key);
+    let value;
+    if (activeCacheProvider === "redis" && redisCloudClient?.isOpen) {
+      const raw = await redisCloudClient.get(key);
+      value = raw ? JSON.parse(raw) : null;
+    } else if (activeCacheProvider === "upstash" && upstashClient) {
+      value = await upstashClient.get(key);
+    } else {
+      value = getMemoryCache(key);
+    }
     if (value === null || value === undefined) {
       cacheStats.misses += 1;
       return null;
@@ -306,6 +363,7 @@ async function cacheGet(key) {
   } catch (error) {
     cacheStats.errors += 1;
     console.warn("Cache get failed:", error.message);
+    if (CACHE_STALE_IF_ERROR) return getMemoryCache(key);
     return null;
   }
 }
@@ -313,8 +371,11 @@ async function cacheGet(key) {
 async function cacheSet(key, value, ttlSeconds) {
   if (!CACHE_ENABLED) return;
   try {
-    if (redis) {
-      await redis.set(key, value, { ex: ttlSeconds });
+    setMemoryCache(key, value, ttlSeconds);
+    if (activeCacheProvider === "redis" && redisCloudClient?.isOpen) {
+      await redisCloudClient.setEx(key, ttlSeconds, JSON.stringify(value));
+    } else if (activeCacheProvider === "upstash" && upstashClient) {
+      await upstashClient.set(key, value, { ex: ttlSeconds });
     } else {
       setMemoryCache(key, value, ttlSeconds);
     }
@@ -330,8 +391,11 @@ async function cacheDelete(keys) {
   const list = Array.isArray(keys) ? keys.filter(Boolean) : [keys].filter(Boolean);
   if (!list.length) return;
   try {
-    if (redis) {
-      await redis.del(...list);
+    list.forEach((key) => memoryCache.delete(key));
+    if (activeCacheProvider === "redis" && redisCloudClient?.isOpen) {
+      await redisCloudClient.del(list);
+    } else if (activeCacheProvider === "upstash" && upstashClient) {
+      await upstashClient.del(...list);
     } else {
       list.forEach((key) => memoryCache.delete(key));
     }
@@ -345,17 +409,23 @@ async function cacheDelete(keys) {
 async function cacheDeleteByPrefix(prefix) {
   if (!CACHE_ENABLED) return;
   try {
-    if (redis) {
+    for (const key of memoryCache.keys()) {
+      if (key.startsWith(prefix)) memoryCache.delete(key);
+    }
+    if (activeCacheProvider === "redis" && redisCloudClient?.isOpen) {
+      let cursor = "0";
+      do {
+        const result = await redisCloudClient.scan(cursor, { MATCH: `${prefix}*`, COUNT: 100 });
+        cursor = String(result.cursor);
+        if (result.keys.length) await redisCloudClient.del(result.keys);
+      } while (cursor !== "0");
+    } else if (activeCacheProvider === "upstash" && upstashClient) {
       let cursor = 0;
       do {
-        const [nextCursor, keys] = await redis.scan(cursor, { match: `${prefix}*`, count: 100 });
+        const [nextCursor, keys] = await upstashClient.scan(cursor, { match: `${prefix}*`, count: 100 });
         cursor = Number(nextCursor);
-        if (keys.length) await redis.del(...keys);
+        if (keys.length) await upstashClient.del(...keys);
       } while (cursor !== 0);
-    } else {
-      for (const key of memoryCache.keys()) {
-        if (key.startsWith(prefix)) memoryCache.delete(key);
-      }
     }
   } catch (error) {
     cacheStats.errors += 1;
@@ -366,6 +436,7 @@ async function cacheDeleteByPrefix(prefix) {
 async function invalidateProductCache(tableId = null) {
   await Promise.all([
     cacheDelete(cacheKey("collections", "all")),
+    cacheDelete(cacheKey("diagnose", "all")),
     cacheDeleteByPrefix(cacheKey("products")),
     tableId ? cacheDelete(cacheKey("table", tableId, "approved")) : Promise.resolve(),
   ]);
@@ -1194,12 +1265,17 @@ app.get("/api/cache/status", (req, res) => {
     success: true,
     enabled: CACHE_ENABLED,
     provider: cacheProvider(),
+    connected: cacheConnected,
+    fallback: cacheFallback,
     ttlSeconds: {
       products: CACHE_PRODUCTS_TTL,
       collections: CACHE_COLLECTIONS_TTL,
       fields: CACHE_FIELDS_TTL,
+      diagnose: CACHE_DIAGNOSE_TTL,
     },
-    memoryKeys: redis ? undefined : memoryCache.size,
+    staleIfError: CACHE_STALE_IF_ERROR,
+    prefixConfigured: Boolean(CACHE_PREFIX),
+    memoryKeys: memoryCache.size,
     stats: cacheStats,
   });
 });
@@ -1240,6 +1316,15 @@ app.post("/api/cache/refresh", async (req, res) => {
 app.get("/api/baserow/diagnose", async (req, res) => {
   try {
     assertConfig();
+    const diagnoseCacheKey = cacheKey("diagnose", "all");
+    const cached = await cacheGet(diagnoseCacheKey);
+    if (cached) {
+      return res.json({
+        ...cached,
+        cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_DIAGNOSE_TTL },
+      });
+    }
+
     const tables = [];
 
     await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
@@ -1302,7 +1387,7 @@ app.get("/api/baserow/diagnose", async (req, res) => {
     const failedTables = tables.length - accessibleTables;
     const warningCount = tables.reduce((sum, table) => sum + table.warnings.length, 0);
 
-    res.json({
+    const payload = {
       success: failedTables === 0,
       databaseId: BASEROW_DATABASE_ID,
       tables,
@@ -1313,6 +1398,12 @@ app.get("/api/baserow/diagnose", async (req, res) => {
         warningCount,
         totalApprovedRows: tables.reduce((sum, table) => sum + table.approvedRows, 0),
       },
+    };
+
+    await cacheSet(diagnoseCacheKey, payload, CACHE_DIAGNOSE_TTL);
+    res.json({
+      ...payload,
+      cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_DIAGNOSE_TTL },
     });
   } catch (error) {
     res.status(error.status || 500).json({ success: false, error: error.message });
@@ -1322,6 +1413,8 @@ app.get("/api/baserow/diagnose", async (req, res) => {
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
+
+await initializeCache();
 
 app.listen(PORT, () => {
   console.log(`Janardhana Saree Review Portal running at http://localhost:${PORT}`);
