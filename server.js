@@ -20,7 +20,7 @@ const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
 const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${BASEROW_DATABASE_ID}:`;
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
 const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
@@ -93,27 +93,36 @@ const MEDIA_PROFILES = {
     ],
   },
   menAccessory: {
-    generated: [
-      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front", "Generated Front", "field_8133053"] },
+    reference: [
+      { label: "Tie Image", key: "tieImage", type: "image", aliases: ["Tie Image", "field_8133049"] },
     ],
-    reference: [],
+    generated: [
+      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "field_8133053"] },
+    ],
   },
   dupatta: {
-    generated: [
-      { label: "Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front"] },
-      { label: "Side View", key: "side", type: "image", aliases: ["Side View", "Generated Side View", "Side"] },
-      { label: "Back View", key: "back", type: "image", aliases: ["Back View", "Generated Back View", "Back"] },
-      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View", "Generated Closeup View", "Generated Close Up View", "Generated Close-up View"] },
+    reference: [
+      { label: "Dupatta Image", key: "dupattaImage", type: "image", aliases: ["Dupatta Image", "field_8133064"] },
+      { label: "Dupatta Detail", key: "dupattaDetail", type: "image", aliases: ["Dupatta Detail", "field_8133065"] },
     ],
-    reference: [],
+    generated: [
+      { label: "Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "field_8133068"] },
+      { label: "Side View", key: "side", type: "image", aliases: ["Side Image", "Side View", "Generated Side View", "field_8133066"] },
+      { label: "Back View", key: "back", type: "image", aliases: ["Back Image", "Back View", "Generated Back View", "field_8133067"] },
+      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View"] },
+    ],
   },
   designerBlouse: {
-    generated: [
-      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front"] },
-      { label: "Generated Back View", key: "back", type: "image", aliases: ["Generated Back View", "Back View", "Back"] },
-      { label: "Generated Detailed View", key: "detail", type: "image", aliases: ["Generated Detailed View", "Detailed View", "Detail View", "Sleeve Detail", "Close-up Detail"] },
+    reference: [
+      { label: "Front Blouse Image", key: "frontBlouse", type: "image", aliases: ["Front Blouse Image", "field_8133079"] },
+      { label: "Back-Side Blouse Image", key: "backBlouse", type: "image", aliases: ["Back-Side Blouse Image", "Back Side Blouse Image", "field_8133080"] },
     ],
-    reference: [],
+    generated: [
+      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View"] },
+      { label: "Generated Back View", key: "back", type: "image", aliases: ["Generated Back View", "Back View"] },
+      { label: "Generated Detailed View", key: "detail", type: "image", aliases: ["Generated Detailed View", "Detailed View", "Detail View"] },
+      { label: "Catalog", key: "catalog", type: "image", aliases: ["Catalog", "field_9225122"], multiple: true },
+    ],
   },
   shawl: {
     generated: [
@@ -128,29 +137,39 @@ const MEDIA_PROFILES = {
     dynamicGenerated: true,
   },
   silkScarf: {
-    generated: [
-      { label: "Flat Lay View", key: "flatLay", type: "image", aliases: ["Flat Lay View", "Flatlay View", "Generated Flat Lay", "Generated Flatlay"] },
-      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Shoulder Styling View", "Generated Shoulder View"] },
-      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View", "Fabric Detail", "Close-up Fabric Detail"] },
+    reference: [
+      { label: "Full Scarves Image", key: "fullScarf", type: "image", aliases: ["Full Scarves Image", "Full Scarf Image", "field_8133125"] },
+      { label: "Details Image", key: "details", type: "image", aliases: ["Details Image", "Detail Image", "field_8133126"] },
     ],
-    reference: [],
+    generated: [
+      { label: "Flat Lay View", key: "flatLay", type: "image", aliases: ["Flat Lay View", "Flatlay View", "Generated Flat Lay"] },
+      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Shoulder Styling View", "Generated Shoulder View"] },
+      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View", "Close-up Fabric Detail"] },
+    ],
   },
   silkStole: {
+    reference: [
+      { label: "Full Stole Image", key: "fullStole", type: "image", aliases: ["Full Stole Image", "field_8133140"] },
+      { label: "Stole Image", key: "stoleImage", type: "image", aliases: ["Stole Image", "field_8133141"] },
+    ],
     generated: [
       { label: "Full Length", key: "fullLength", type: "image", aliases: ["Full Length", "Full Length View", "Generated Full Length"] },
-      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Engaged Shoulder", "Shoulder Styling View", "Generated Shoulder View"] },
-      { label: "Front Facing Neck Wrap", key: "neckWrap", type: "image", aliases: ["Front Facing Neck Wrap", "Neck Wrap View", "Front Neck Wrap", "Generated Neck Wrap"] },
+      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Engaged Shoulder", "Shoulder Styling View"] },
+      { label: "Front Facing Neck Wrap", key: "neckWrap", type: "image", aliases: ["Front Facing Neck Wrap", "Neck Wrap View", "Front Neck Wrap"] },
+      { label: "Elegant Shoulder", key: "elegantShoulder", type: "image", aliases: ["Elegant Shoulder", "field_8331859"] },
     ],
-    reference: [],
   },
   fabric: {
-    generated: [
-      { label: "Luxury Chair Drape", key: "chairDrape", type: "image", aliases: ["Luxury Chair Drape", "Chair Drape", "Generated Chair Drape"] },
-      { label: "Hanging Ladder Display", key: "ladder", type: "image", aliases: ["Hanging Ladder Display", "Ladder Display", "Generated Hanging Ladder"] },
-      { label: "Fabric Roll + Cascading Drape", key: "rollDrape", type: "image", aliases: ["Fabric Roll + Cascading Drape", "Fabric Roll Cascading Drape", "Roll + Cascading Drape", "Generated Roll Drape"] },
-      { label: "Artistic Spiral Flatlay Close-Up", key: "spiral", type: "image", aliases: ["Artistic Spiral Flatlay Close-Up", "Artistic Spiral Flatlay Closeup", "Spiral Flatlay Close-Up", "Spiral Flatlay", "Generated Spiral Flatlay"] },
+    reference: [
+      { label: "Fabric Image", key: "fabric", type: "image", aliases: ["Fabric", "field_8253759"], multiple: true },
     ],
-    reference: [],
+    generated: [
+      { label: "Luxury Chair Drape", key: "chairDrape", type: "image", aliases: ["Luxury Chair Drape", "Chair Drape"] },
+      { label: "Hanging Ladder Display", key: "ladder", type: "image", aliases: ["Hanging Ladder Display", "Ladder Display"] },
+      { label: "Fabric Roll + Cascading Drape", key: "rollDrape", type: "image", aliases: ["Fabric Roll + Cascading Drape", "Fabric Roll Cascading Drape", "Roll + Cascading Drape"] },
+      { label: "Artistic Spiral Flatlay Close-Up", key: "spiral", type: "image", aliases: ["Artistic Spiral Flatlay Close-Up", "Artistic Spiral Flatlay Closeup", "Spiral Flatlay"] },
+      { label: "Grid", key: "grid", type: "image", aliases: ["Grid", "Grid View", "Generated Grid"] },
+    ],
   },
 };
 
@@ -347,7 +366,7 @@ const SAREE_TABLES = [
     name: "Men Accessories",
     displayName: "Men Tie",
     group: "Accessories",
-    subcategory: "Men Accessories",
+    subcategory: "Men Tie",
     mediaProfile: "menAccessory",
     tableId: 936098,
     fields: {
@@ -873,7 +892,10 @@ function getSelectOptionValues(field) {
 
 function findFieldByAliases(fieldMap, aliases) {
   const normalizedAliases = new Set(aliases.map((alias) => normalizeFieldName(alias)));
-  const field = fieldMap?.fields?.find((item) => normalizedAliases.has(normalizeFieldName(item.name)));
+  const field = fieldMap?.fields?.find((item) =>
+    normalizedAliases.has(normalizeFieldName(item.name)) ||
+    normalizedAliases.has(normalizeFieldName(`field_${item.id}`))
+  );
   return field ? { id: field.id, name: field.name, type: field.type } : null;
 }
 
@@ -914,6 +936,27 @@ function sampleMediaAvailability(rows, tableConfig, fieldMap) {
   });
 
   return counts;
+}
+
+function mediaFieldDetection(rows, tableConfig, fieldMap, type) {
+  const profile = mediaProfileFor(tableConfig);
+  const namedRows = rows.map((row) => rowWithFieldNames(row, fieldMap?.fields || []));
+
+  return (profile[type] || []).map((mediaDef) => {
+    const foundField = findFieldByAliases(fieldMap, mediaDef.aliases || []);
+    const count = namedRows.reduce((sum, namedRow) => {
+      const rawValue = getByNormalizedAliases(namedRow, mediaDef.aliases || []);
+      return sum + (mediaDef.multiple ? getFileUrls(rawValue).length : (getFileUrl(rawValue) ? 1 : 0));
+    }, 0);
+
+    return {
+      label: mediaDef.label,
+      aliases: mediaDef.aliases || [],
+      foundFieldName: foundField?.name || null,
+      foundFieldId: foundField?.id || null,
+      count,
+    };
+  });
 }
 
 function validateTableFields(tableConfig, fieldMap) {
@@ -973,38 +1016,44 @@ function validateTableFields(tableConfig, fieldMap) {
   };
 }
 
-function getFileUrl(value) {
-  if (!value) return null;
+function getFileUrls(value) {
+  if (!value) return [];
 
-  if (typeof value === "string") {
-    return value;
-  }
+  if (typeof value === "string") return [value];
 
   if (Array.isArray(value)) {
-    const file = value[0];
-    if (!file) return null;
-    return (
-      file.url ||
-      file.thumbnails?.large?.url ||
-      file.thumbnails?.card_cover?.url ||
-      file.thumbnails?.small?.url ||
-      file.thumbnails?.tiny?.url ||
-      null
-    );
+    return value
+      .map((file) => {
+        if (!file) return null;
+        if (typeof file === "string") return file;
+        return (
+          file.url ||
+          file.thumbnails?.large?.url ||
+          file.thumbnails?.card_cover?.url ||
+          file.thumbnails?.small?.url ||
+          file.thumbnails?.tiny?.url ||
+          null
+        );
+      })
+      .filter(Boolean);
   }
 
   if (typeof value === "object") {
-    return (
+    const url =
       value.url ||
       value.thumbnails?.large?.url ||
       value.thumbnails?.card_cover?.url ||
       value.thumbnails?.small?.url ||
       value.thumbnails?.tiny?.url ||
-      null
-    );
+      null;
+    return url ? [url] : [];
   }
 
-  return null;
+  return [];
+}
+
+function getFileUrl(value) {
+  return getFileUrls(value)[0] || null;
 }
 
 function parsePrice(value) {
@@ -1018,17 +1067,44 @@ function mediaProfileFor(tableConfig) {
   return MEDIA_PROFILES[tableConfig.mediaProfile] || MEDIA_PROFILES.saree;
 }
 
+function buildMediaArray(namedRow, mediaDefs) {
+  const output = [];
+
+  for (const mediaDef of mediaDefs || []) {
+    const rawValue = getByNormalizedAliases(namedRow, mediaDef.aliases || []);
+
+    if (mediaDef.multiple) {
+      const urls = getFileUrls(rawValue);
+      urls.forEach((url, index) => {
+        output.push({
+          key: `${mediaDef.key}_${index + 1}`,
+          label: urls.length > 1 ? `${mediaDef.label} ${index + 1}` : mediaDef.label,
+          type: mediaDef.type || "image",
+          url,
+        });
+      });
+      continue;
+    }
+
+    const url = getFileUrl(rawValue);
+    if (url) {
+      output.push({
+        key: mediaDef.key,
+        label: mediaDef.label,
+        type: mediaDef.type || "image",
+        url,
+      });
+    }
+  }
+
+  return output;
+}
+
 function buildMediaItems(namedRow, fieldMap, tableConfig, type) {
   const profile = mediaProfileFor(tableConfig);
   const configuredItems = profile[type] || [];
-  const items = [];
-  const seenKeys = new Set();
-
-  configuredItems.forEach((item) => {
-    const url = getFileUrl(getByNormalizedAliases(namedRow, item.aliases || []));
-    items.push({ key: item.key, label: item.label, type: item.type || "image", url });
-    seenKeys.add(item.key);
-  });
+  const items = buildMediaArray(namedRow, configuredItems);
+  const seenKeys = new Set(items.map((item) => item.key));
 
   if (type === "generated" && profile.dynamicGenerated) {
     (fieldMap?.fields || []).forEach((field) => {
@@ -1037,9 +1113,15 @@ function buildMediaItems(namedRow, fieldMap, tableConfig, type) {
       if (!/(view|generated|drape|texture|border|close|front|shoulder|folded)/i.test(fieldName)) return;
       const key = slugify(fieldName).replace(/-/g, "_");
       if (seenKeys.has(key)) return;
-      const url = getFileUrl(getByNormalizedAliases(namedRow, [fieldName, `field_${field.id}`]));
-      if (!url) return;
-      items.push({ key, label: fieldName, type: "image", url });
+      const urls = getFileUrls(getByNormalizedAliases(namedRow, [fieldName, `field_${field.id}`]));
+      urls.forEach((url, index) => {
+        items.push({
+          key: urls.length > 1 ? `${key}_${index + 1}` : key,
+          label: urls.length > 1 ? `${fieldName} ${index + 1}` : fieldName,
+          type: "image",
+          url,
+        });
+      });
       seenKeys.add(key);
     });
   }
@@ -1060,9 +1142,14 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   const namedRow = rowWithFieldNames(row, fieldMap?.fields || []);
   const generatedMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "generated");
   const referenceMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "reference");
-  const images = Object.fromEntries(
-    [...referenceMedia, ...generatedMedia].map((item) => [item.key, item.url])
-  );
+  const images = {};
+  [...referenceMedia, ...generatedMedia].forEach((item) => {
+    images[item.key] = item.url;
+    const baseKey = String(item.key || "").replace(/_\d+$/, "");
+    if (baseKey && !images[baseKey]) images[baseKey] = item.url;
+  });
+  if (!images.front && generatedMedia[0]) images.front = generatedMedia[0].url;
+  if (!images.full && referenceMedia[0]) images.full = referenceMedia[0].url;
 
   return {
     id: `${tableConfig.tableId}:${row.id}`,
@@ -1377,7 +1464,7 @@ async function buildCollectionsPayload() {
 }
 
 async function buildProductsPayload(query = {}) {
-  const { tableId, collection, group, search, status, sort } = query;
+  const { tableId, collection, group } = query;
   let tablesToFetch = SAREE_TABLES;
   let mode = "all-tables";
 
@@ -1462,13 +1549,12 @@ async function buildProductsPayload(query = {}) {
     SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
   );
 
-  const filteredProducts = applyProductFilters(products, { search, status, sort });
   const groups = buildCollectionGroups(collections);
 
   return {
     success: true,
-    count: filteredProducts.length,
-    products: filteredProducts,
+    count: products.length,
+    products,
     groups,
     collections,
     errors,
@@ -1504,12 +1590,24 @@ app.get("/api/products", async (req, res) => {
     const key = productCacheKey(req.query);
     const cached = await cacheGet(key);
     if (cached) {
-      return res.json({ ...cached, debug: { ...cached.debug, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_PRODUCTS_TTL } } });
+      const products = applyProductFilters(cached.products || [], req.query);
+      return res.json({
+        ...cached,
+        count: products.length,
+        products,
+        debug: { ...cached.debug, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_PRODUCTS_TTL } },
+      });
     }
 
     const payload = await buildProductsPayload(req.query);
     await cacheSet(key, payload, CACHE_PRODUCTS_TTL);
-    res.json({ ...payload, debug: { ...payload.debug, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_PRODUCTS_TTL } } });
+    const products = applyProductFilters(payload.products || [], req.query);
+    res.json({
+      ...payload,
+      count: products.length,
+      products,
+      debug: { ...payload.debug, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_PRODUCTS_TTL } },
+    });
   } catch (error) {
     console.error(error);
     res.status(error.status || 500).json({ success: false, error: error.message });
@@ -1673,6 +1771,8 @@ app.post("/api/cache/refresh", async (req, res) => {
       cacheDelete(legacyCacheKey("diagnose")),
       cacheDelete(versionedCacheKey("v2", "collections")),
       cacheDelete(versionedCacheKey("v2", "diagnose")),
+      cacheDelete(versionedCacheKey("v3", "collections")),
+      cacheDelete(versionedCacheKey("v3", "diagnose")),
       cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
     ]);
 
@@ -1721,23 +1821,23 @@ app.get("/api/baserow/diagnose", async (req, res) => {
 
     await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
       try {
-        const { approvedRows, fieldMap } = await fetchApprovedForTable(tableConfig);
+        const { rows, approvedRows, fieldMap } = await fetchApprovedForTable(tableConfig);
         const validation = validateTableFields(tableConfig, fieldMap);
         const mediaFields = detectMediaFields(fieldMap);
         const mediaWarnings = [];
         const mediaProfile = mediaProfileFor(tableConfig);
+        const referenceFieldsDetected = mediaFieldDetection(rows.slice(0, 200), tableConfig, fieldMap, "reference");
+        const generatedFieldsDetected = mediaFieldDetection(rows.slice(0, 200), tableConfig, fieldMap, "generated");
 
-        mediaProfile.generated.forEach((item) => {
-          if (!findFieldByAliases(fieldMap, item.aliases || [])) {
-            mediaWarnings.push(`${item.label} generated media field was not detected for profile ${tableConfig.mediaProfile}.`);
-          }
+        generatedFieldsDetected.forEach((item) => {
+          if (!item.foundFieldName) mediaWarnings.push(`${item.label} generated media field was not detected for profile ${tableConfig.mediaProfile}.`);
         });
 
-        mediaProfile.reference.forEach((item) => {
-          if (!findFieldByAliases(fieldMap, item.aliases || [])) {
-            mediaWarnings.push(`${item.label} reference media field was not detected for profile ${tableConfig.mediaProfile}.`);
-          }
+        referenceFieldsDetected.forEach((item) => {
+          if (!item.foundFieldName) mediaWarnings.push(`${item.label} reference media field was not detected for profile ${tableConfig.mediaProfile}.`);
         });
+        const sampleReferenceMediaCount = referenceFieldsDetected.reduce((sum, item) => sum + item.count, 0);
+        const sampleGeneratedMediaCount = generatedFieldsDetected.reduce((sum, item) => sum + item.count, 0);
 
         tables.push({
           name: tableConfig.name,
@@ -1753,6 +1853,10 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
           liveFields: validation.fields,
+          referenceFieldsDetected,
+          generatedFieldsDetected,
+          sampleReferenceMediaCount,
+          sampleGeneratedMediaCount,
           generatedMediaFields: mediaFields.generatedMediaFields,
           referenceMediaFields: mediaFields.referenceMediaFields,
           sampleMediaAvailability: sampleMediaAvailability(approvedRows.slice(0, 100), tableConfig, fieldMap),
@@ -1774,6 +1878,10 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
           liveFields: null,
+          referenceFieldsDetected: [],
+          generatedFieldsDetected: [],
+          sampleReferenceMediaCount: 0,
+          sampleGeneratedMediaCount: 0,
           generatedMediaFields: null,
           referenceMediaFields: null,
           sampleMediaAvailability: null,

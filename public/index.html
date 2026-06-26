@@ -609,7 +609,7 @@
 
     .generated-thumb-strip {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
       gap: 12px;
       margin-top: 14px;
     }
@@ -680,7 +680,7 @@
 
     .reference-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
     }
 
@@ -1126,7 +1126,8 @@
 
       .product-summary { grid-template-columns: 1fr; }
       .summary-img { height: 220px; }
-      .reference-grid, .compare-grid, .modal-grid { grid-template-columns: 1fr; }
+      .reference-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .compare-grid, .modal-grid { grid-template-columns: 1fr; }
       .hero-preview, .compare-img { height: 330px; }
       .thumb-strip { grid-template-columns: repeat(3, 1fr); }
       .generated-thumb-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1457,8 +1458,11 @@
 
         products = Array.isArray(data.products) ? data.products : [];
 
-        if (products.length && !products.find(p => p.id === state.selectedProductId)) {
-          state.selectedProductId = products[0].id;
+        const visibleProducts = filteredProducts();
+        if (visibleProducts.length && !visibleProducts.find(p => p.id === state.selectedProductId)) {
+          state.selectedProductId = visibleProducts[0].id;
+        } else if (!visibleProducts.length) {
+          state.selectedProductId = null;
         }
 
         renderAll(false);
@@ -1692,10 +1696,17 @@
     }
 
     function referenceMediaForProduct(product) {
+      return availableReference(product);
+    }
+
+    function availableReference(product) {
       if (Array.isArray(product?.referenceMedia)) {
         return product.referenceMedia.filter(item => item && item.url);
       }
-      return isSuitProduct(product) ? SUIT_REFERENCE_MEDIA : SAREE_REFERENCE_MEDIA;
+      const fallback = isSuitProduct(product) ? SUIT_REFERENCE_MEDIA : SAREE_REFERENCE_MEDIA;
+      return fallback
+        .filter(item => Boolean(product?.images?.[item.key]))
+        .map(item => ({ ...item, url: product.images[item.key] }));
     }
 
     function productPreviewUrl(product) {
@@ -1745,6 +1756,7 @@
       const list = filteredProducts();
       grid.innerHTML = list.map(p => {
         const generatedItems = availableGenerated(p);
+        const thumbnailItems = generatedItems.length ? generatedItems : availableReference(p);
         return `
           <article class="product-card">
             <div class="card-img zoom-wrap">${makeZoomable(productPreviewUrl(p), p.title)}</div>
@@ -1758,7 +1770,7 @@
                 <span class="badge ${p.shopify === 'Approved' ? 'green' : ''}">Shopify: ${p.shopify}</span>
               </div>
               <div class="mini-thumbs">
-                ${generatedItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(item.url || p.images?.[item.key], item.shortLabel || item.label, item.type)}</div>`).join('')}
+                ${thumbnailItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(item.url || p.images?.[item.key], item.shortLabel || item.label, item.type)}</div>`).join('')}
               </div>
               <div class="card-actions">
                 <button class="btn btn-neutral" onclick="selectProduct('${p.id}', 'detail')">Review</button>
