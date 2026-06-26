@@ -27,6 +27,13 @@ const SAREE_TABLES = [
   { name: "Linen & Kota Silk Sarees", tableId: 935217, fields: { generationStatus: "field_8123254", shopify: "field_8123257", comment: "field_8123255" } },
   { name: "Art Silk Sarees", tableId: 935218, fields: { generationStatus: "field_8123271", shopify: "field_8123274", comment: "field_8123272" } },
   { name: "Bandhani Silk Saree", tableId: 935212, fields: { generationStatus: "field_8123169", shopify: "field_8123172", comment: "field_8123170" } },
+  { name: "Men Accessories / Men Tie", tableId: 936098, fields: { generationStatus: "field_8133054", shopify: "field_8133057", comment: "field_8133056" } },
+  { name: "Dupattas", tableId: 936099, fields: { generationStatus: "field_8133069", shopify: "field_8133072", comment: "field_8133070" } },
+  { name: "Designer Blouses", tableId: 936100, fields: { generationStatus: "field_8133084", shopify: "field_8133087", comment: "field_8133086" } },
+  { name: "Shawls", tableId: 936101, fields: { generationStatus: "field_8133109", shopify: "field_8133115", comment: "field_8133113" } },
+  { name: "Silk Scarves", tableId: 936102, fields: { generationStatus: "field_8133130", shopify: "field_8133133", comment: "field_8133132" } },
+  { name: "Silk Stoles", tableId: 936103, fields: { generationStatus: "field_8133145", shopify: "field_8133148", comment: "field_8133147" } },
+  { name: "Fabrics / Silk Fabric", tableId: 948124, fields: { generationStatus: "field_8253764", shopify: "field_8253767", comment: "field_8253765" } },
 ];
 
 function maskToken(token) {

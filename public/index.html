@@ -1324,7 +1324,14 @@
       { name: "Silk Suits", tableId: 936060 },
       { name: "Linen & Kota Silk Sarees", tableId: 935217 },
       { name: "Art Silk Sarees", tableId: 935218 },
-      { name: "Bandhani Silk Saree", tableId: 935212 }
+      { name: "Bandhani Silk Saree", tableId: 935212 },
+      { name: "Men Tie", collectionName: "Men Accessories", group: "Accessories", tableId: 936098 },
+      { name: "Dupattas", group: "Accessories", tableId: 936099 },
+      { name: "Designer Blouses", group: "Accessories", tableId: 936100 },
+      { name: "Shawls", group: "Accessories", tableId: 936101 },
+      { name: "Silk Scarves", group: "Accessories", tableId: 936102 },
+      { name: "Silk Stoles", group: "Accessories", tableId: 936103 },
+      { name: "Silk Fabric", collectionName: "Fabrics", group: "Fabric", tableId: 948124 }
     ];
 
     const CATEGORY_GROUPS = [
@@ -1354,10 +1361,22 @@
       {
         name: 'Salwar Kameez',
         children: ['Cotton Suits', 'Silk Suits']
+      },
+      {
+        name: 'Accessories',
+        children: ['Men Tie', 'Dupattas', 'Designer Blouses', 'Shawls', 'Silk Scarves', 'Silk Stoles']
+      },
+      {
+        name: 'Fabric',
+        children: ['Silk Fabric']
       }
     ];
 
-    const tableByName = new Map(SAREE_TABLES.map(table => [table.name, table]));
+    const tableByName = new Map();
+    SAREE_TABLES.forEach(table => {
+      tableByName.set(table.name, table);
+      if (table.collectionName) tableByName.set(table.collectionName, table);
+    });
     let products = [];
     let collectionCounts = new Map();
     let isFetchingProducts = false;
@@ -1374,6 +1393,17 @@
         if (!response.ok || !data.success) throw new Error(data.error || 'Unable to fetch collections');
         collectionCounts = new Map((data.collections || []).map(item => [String(item.tableId), item.count || 0]));
         collectionCounts.set('all', data.total || 0);
+        (data.collections || []).forEach(item => {
+          const table = {
+            name: item.displayName || item.name,
+            collectionName: item.name,
+            group: item.group,
+            subcategory: item.subcategory,
+            tableId: item.tableId
+          };
+          tableByName.set(table.name, table);
+          tableByName.set(item.name, table);
+        });
         renderCategories();
         return data;
       } catch (error) {
@@ -1394,6 +1424,8 @@
 
         if (state?.selectedTableId && state.selectedTableId !== 'all') {
           params.set('tableId', state.selectedTableId);
+        } else if (state?.selectedCollection?.type === 'group') {
+          params.set('group', state.selectedCollection.name);
         }
 
         const q = document.getElementById('searchInput')?.value?.trim();
@@ -1542,10 +1574,8 @@
     function productMatchesCollection(product, selectedCollection) {
       if (!selectedCollection || selectedCollection.name === 'All Collections') return true;
 
-      if (selectedCollection.name === 'Salwar Kameez') {
-        return [936059, 936060].includes(Number(product.tableId)) ||
-          ['Cotton Suits', 'Silk Suits'].includes(product.collectionName) ||
-          ['Cotton Suits', 'Silk Suits'].includes(product.category);
+      if (selectedCollection.type === 'group' || getCategoryChildren(selectedCollection.name).length) {
+        return String(product.group || '').trim().toLowerCase() === String(selectedCollection.name || '').trim().toLowerCase();
       }
 
       if (selectedCollection.tableId && selectedCollection.tableId !== 'all') {
@@ -1554,6 +1584,8 @@
 
       const selectedName = String(selectedCollection.name || '').trim().toLowerCase();
       return (
+        String(product.displayName || '').trim().toLowerCase() === selectedName ||
+        String(product.subcategory || '').trim().toLowerCase() === selectedName ||
         String(product.collectionName || '').trim().toLowerCase() === selectedName ||
         String(product.category || '').trim().toLowerCase() === selectedName
       );
@@ -1576,7 +1608,7 @@
         return collectionCounts.get(String(table.tableId));
       }
 
-      return products.filter(product => product.category === categoryName).length;
+      return products.filter(product => productMatchesCollection(product, { name: categoryName, tableId: table?.tableId || 'all' })).length;
     }
 
     function filteredProducts() {
@@ -1660,7 +1692,18 @@
     }
 
     function referenceMediaForProduct(product) {
+      if (Array.isArray(product?.referenceMedia)) {
+        return product.referenceMedia.filter(item => item && item.url);
+      }
       return isSuitProduct(product) ? SUIT_REFERENCE_MEDIA : SAREE_REFERENCE_MEDIA;
+    }
+
+    function productPreviewUrl(product) {
+      const generated = availableGenerated(product);
+      if (generated.length) return generated[0].url;
+      const refs = referenceMediaForProduct(product);
+      if (refs.length) return refs[0].url || product.images?.[refs[0].key];
+      return product?.images?.grid || product?.images?.front || product?.images?.full || null;
     }
 
     function renderCategories() {
@@ -1673,14 +1716,12 @@
       sel.insertAdjacentHTML('beforeend', `<option value="All Collections" ${state.selectedCategory === 'All Collections' ? 'selected' : ''}>All Collections</option>`);
 
       CATEGORY_GROUPS.forEach(group => {
-        if (group.name !== 'Saree Collections') {
-          tabs.insertAdjacentHTML('beforeend', `<button class="tab category-group-tab ${state.selectedCategory === group.name ? 'active' : ''}" onclick="selectCategory('${escapeJs(group.name)}')">${group.name}<span class="count">${getCategoryCount(group.name)}</span></button>`);
-          sel.insertAdjacentHTML('beforeend', `<option value="${group.name}" ${state.selectedCategory === group.name ? 'selected' : ''}>${group.name}</option>`);
-        }
+        tabs.insertAdjacentHTML('beforeend', `<button class="tab category-group-tab ${state.selectedCategory === group.name ? 'active' : ''}" onclick="selectCategory('${escapeJs(group.name)}')">${group.name}<span class="count">${getCategoryCount(group.name)}</span></button>`);
+        sel.insertAdjacentHTML('beforeend', `<option value="${group.name}" ${state.selectedCategory === group.name ? 'selected' : ''}>${group.name}</option>`);
 
         group.children.forEach(childName => {
-          const tabClass = group.name === 'Salwar Kameez' ? 'category-child-tab' : '';
-          const optionLabel = group.name === 'Salwar Kameez' ? `-- ${childName}` : childName;
+          const tabClass = group.name === 'Saree Collections' ? '' : 'category-child-tab';
+          const optionLabel = group.name === 'Saree Collections' ? childName : `${group.name} - ${childName}`;
           tabs.insertAdjacentHTML('beforeend', `<button class="tab ${tabClass} ${state.selectedCategory === childName ? 'active' : ''}" onclick="selectCategory('${escapeJs(childName)}')">${childName}<span class="count">${getCategoryCount(childName)}</span></button>`);
           sel.insertAdjacentHTML('beforeend', `<option value="${childName}" ${state.selectedCategory === childName ? 'selected' : ''}>${optionLabel}</option>`);
         });
@@ -1694,7 +1735,7 @@
       state.selectedCollectionName = cat;
       const table = tableByName.get(cat);
       state.selectedTableId = table && !getCategoryChildren(cat).length ? String(table.tableId) : 'all';
-      state.selectedCollection = { name: cat, tableId: state.selectedTableId };
+      state.selectedCollection = { name: cat, tableId: state.selectedTableId, type: getCategoryChildren(cat).length ? 'group' : 'collection' };
       state.selectedProductId = null;
       fetchProductsFromAPI();
     }
@@ -1706,18 +1747,18 @@
         const generatedItems = availableGenerated(p);
         return `
           <article class="product-card">
-            <div class="card-img zoom-wrap">${makeZoomable(p.images.grid || p.images.front || p.images.full, p.title)}</div>
+            <div class="card-img zoom-wrap">${makeZoomable(productPreviewUrl(p), p.title)}</div>
             <div class="card-content">
               <span class="code-pill">${p.code}</span>
               <h3 class="card-title">${p.title}</h3>
-              <div class="card-muted">${p.category}</div>
+              <div class="card-muted">${p.group || 'Catalog'} / ${p.subcategory || p.displayName || p.collectionName || p.category}</div>
               <div class="price">${formatPrice(p.price)}</div>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <span class="badge">${p.generationStatus}</span>
                 <span class="badge ${p.shopify === 'Approved' ? 'green' : ''}">Shopify: ${p.shopify}</span>
               </div>
               <div class="mini-thumbs">
-                ${generatedItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(p.images[item.key], item.shortLabel, item.type)}</div>`).join('')}
+                ${generatedItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(item.url || p.images?.[item.key], item.shortLabel || item.label, item.type)}</div>`).join('')}
               </div>
               <div class="card-actions">
                 <button class="btn btn-neutral" onclick="selectProduct('${p.id}', 'detail')">Review</button>
@@ -1731,11 +1772,12 @@
 
     function renderSummary(p) {
       document.getElementById('productSummary').innerHTML = `
-        <div class="summary-img zoom-wrap">${makeZoomable(p.images.grid || p.images.front || p.images.full, p.title)}</div>
+        <div class="summary-img zoom-wrap">${makeZoomable(productPreviewUrl(p), p.title)}</div>
         <div class="meta-table">
           <div class="meta-row"><span>Product Code</span><strong>${p.code}</strong></div>
           <div class="meta-row"><span>Product Title</span><strong>${p.title}</strong></div>
-          <div class="meta-row"><span>Category</span><strong>${p.category}</strong></div>
+          <div class="meta-row"><span>Group</span><strong>${p.group || 'Catalog'}</strong></div>
+          <div class="meta-row"><span>Category</span><strong>${p.subcategory || p.displayName || p.collectionName || p.category}</strong></div>
           <div class="meta-row"><span>Price (INR)</span><strong>${formatPrice(p.price)}</strong></div>
         </div>
         <div class="meta-table">
@@ -1749,8 +1791,13 @@
     }
 
     function availableGenerated(p) {
+      if (Array.isArray(p?.generatedMedia)) {
+        return p.generatedMedia.filter(item => item && item.url);
+      }
       if (!p || !p.images) return [];
-      return GENERATED_MEDIA.filter(item => Boolean(p.images[item.key]));
+      return GENERATED_MEDIA
+        .filter(item => Boolean(p.images[item.key]))
+        .map(item => ({ ...item, url: p.images[item.key] }));
     }
 
     function renderGenerated(p) {
@@ -1772,12 +1819,12 @@
       }
 
       tabs.innerHTML = available.map(item => `<button class="mini-tab ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)">${item.label}</button>`).join('');
-      const heroSrc = p.images[selected.key];
+      const heroSrc = selected.url || p.images?.[selected.key];
       const heroLabel = selected.type === 'video' ? 'Generated Video Output' : `Generated ${selected.label}`;
       hero.innerHTML = `<div class="image-label">${heroLabel}</div>${makeMedia(heroSrc, heroLabel, selected.type)}`;
       strip.className = 'thumb-strip generated-thumb-strip';
       strip.innerHTML = available.map(item => {
-        const src = p.images[item.key];
+        const src = item.url || p.images?.[item.key];
         return `<button class="thumb generated-thumb ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)"><div class="thumb-img generated-thumb-media zoom-wrap">${makeMediaThumb(src, item.label, item.type)}</div><span class="generated-thumb-label">${item.label}</span></button>`;
       }).join('');
     }
@@ -1785,9 +1832,13 @@
     function renderReferences(p) {
       const grid = document.getElementById('referenceGrid');
       const refs = referenceMediaForProduct(p);
+      if (!refs.length) {
+        grid.innerHTML = '<div class="panel" style="grid-column:1/-1;text-align:center;padding:30px;"><p class="card-muted">No reference images available for this category.</p></div>';
+        return;
+      }
       grid.innerHTML = refs.map(ref => `
         <div class="ref-card">
-          <div class="ref-img zoom-wrap">${renderMediaPreview(p.images?.[ref.key], ref.label, ref.type)}</div>
+          <div class="ref-img zoom-wrap">${renderMediaPreview(ref.url || p.images?.[ref.key], ref.label, ref.type)}</div>
           <div class="ref-label">${ref.label}</div>
         </div>
       `).join('');
@@ -1810,27 +1861,31 @@
       }
       refSel.innerHTML = refs.map(ref => `<option ${ref.label === state.selectedReference ? 'selected' : ''}>${ref.label}</option>`).join('');
       genSel.innerHTML = available.map(item => `<option ${item.label === state.selectedGenerated ? 'selected' : ''}>${item.label}</option>`).join('');
-      const refSrc = selectedRef ? p.images?.[selectedRef.key] : null;
-      const genSrc = selected ? p.images[selected.key] : null;
+      refSel.disabled = !refs.length;
+      genSel.disabled = !available.length;
+      const refSrc = selectedRef ? (selectedRef.url || p.images?.[selectedRef.key]) : null;
+      const genSrc = selected ? (selected.url || p.images?.[selected.key]) : null;
       document.getElementById('compareRefTitle').textContent = selectedRef ? `Reference - ${selectedRef.label}` : 'Reference';
       document.getElementById('compareGenTitle').textContent = selected ? `Generated - ${selected.label}` : 'Generated Output';
-      document.getElementById('compareRef').innerHTML = selectedRef ? renderMediaPreview(refSrc, `Reference ${selectedRef.label}`, selectedRef.type) : '<div class="empty-img">Media not available</div>';
+      document.getElementById('compareRef').innerHTML = selectedRef ? renderMediaPreview(refSrc, `Reference ${selectedRef.label}`, selectedRef.type) : '<div class="empty-img">No reference media available.</div>';
       document.getElementById('compareGen').innerHTML = selected ? makeMedia(genSrc, `Generated ${selected.label}`, selected.type) : '<div class="empty-img">No generated output available</div>';
     }
 
     function renderMobile(p) {
       const refs = referenceMediaForProduct(p);
+      const generated = availableGenerated(p);
+      const selectedMobileGenerated = generated[0];
       document.getElementById('mobilePreview').innerHTML = `
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
           <div class="phone-tabs">${SAREE_TABLES.slice(1,5).map((table,i)=>`<span class="tab ${i===0?'active':''}">${table.name.split(' ')[0]}<span class="count">${collectionCounts.get(String(table.tableId)) || 0}</span></span>`).join('')}</div>
           <div class="phone-card"><strong>${p.code}</strong><br>${p.title}<br><span class="price">${formatPrice(p.price)}</span><br><span class="badge">${p.generationStatus}</span></div>
-          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;"><button class="mini-tab active">Front</button><button class="mini-tab">Side</button><button class="mini-tab">Back</button><button class="mini-tab">Close-up</button></div><div class="phone-hero zoom-wrap">${makeZoomable(p.images.front, 'Mobile Front View')}</div></div>
+          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;">${generated.map((item, index) => `<button class="mini-tab ${index === 0 ? 'active' : ''}">${item.label}</button>`).join('')}</div><div class="phone-hero zoom-wrap">${makeMedia(selectedMobileGenerated?.url, selectedMobileGenerated?.label || 'Mobile generated preview', selectedMobileGenerated?.type)}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
         </div>
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
-          <div class="phone-card"><div class="phone-ref">${refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('')}</div></div>
+          <div class="phone-card"><div class="phone-ref">${refs.length ? refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(ref.url || p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('') : '<div class="empty-img">No reference images available for this category.</div>'}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
         </div>
       `;

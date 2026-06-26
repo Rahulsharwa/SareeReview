@@ -20,7 +20,7 @@ const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
 const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${BASEROW_DATABASE_ID}:`;
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
 const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
@@ -60,6 +60,98 @@ const GENERATED_MEDIA_ALIASES = {
   ],
   grid: ["Grid View", "Generated Grid View", "Grid", "Generated Grid"],
   video: ["Video", "Generated Video", "Video Output", "Generated Video Output"],
+};
+
+const MEDIA_PROFILES = {
+  saree: {
+    generated: [
+      { label: "Front View", key: "front", type: "image", aliases: GENERATED_MEDIA_ALIASES.front },
+      { label: "Side View", key: "side", type: "image", aliases: GENERATED_MEDIA_ALIASES.side },
+      { label: "Back View", key: "back", type: "image", aliases: GENERATED_MEDIA_ALIASES.back },
+      { label: "Close-up View", key: "close", type: "image", aliases: GENERATED_MEDIA_ALIASES.close },
+      { label: "Grid View", key: "grid", type: "image", aliases: GENERATED_MEDIA_ALIASES.grid },
+      { label: "Video", key: "video", type: "video", aliases: GENERATED_MEDIA_ALIASES.video },
+    ],
+    reference: [
+      { label: "Full Saree Image", key: "full", type: "image", aliases: REFERENCE_MEDIA_ALIASES.full },
+      { label: "Blouse Image", key: "blouse", type: "image", aliases: REFERENCE_MEDIA_ALIASES.blouse },
+      { label: "Pallu Image", key: "pallu", type: "image", aliases: REFERENCE_MEDIA_ALIASES.pallu },
+      { label: "Border Image", key: "border", type: "image", aliases: REFERENCE_MEDIA_ALIASES.border },
+    ],
+  },
+  suit: {
+    generated: [
+      { label: "Front View", key: "front", type: "image", aliases: GENERATED_MEDIA_ALIASES.front },
+      { label: "Side View", key: "side", type: "image", aliases: GENERATED_MEDIA_ALIASES.side },
+      { label: "Back View", key: "back", type: "image", aliases: GENERATED_MEDIA_ALIASES.back },
+      { label: "Close-up View", key: "close", type: "image", aliases: GENERATED_MEDIA_ALIASES.close },
+      { label: "Grid View", key: "grid", type: "image", aliases: GENERATED_MEDIA_ALIASES.grid },
+    ],
+    reference: [
+      { label: "Full Suit Image", key: "fullSuit", type: "image", aliases: REFERENCE_MEDIA_ALIASES.fullSuit },
+      { label: "Back Image", key: "suitBack", type: "image", aliases: REFERENCE_MEDIA_ALIASES.suitBack },
+    ],
+  },
+  menAccessory: {
+    generated: [
+      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front", "Generated Front", "field_8133053"] },
+    ],
+    reference: [],
+  },
+  dupatta: {
+    generated: [
+      { label: "Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front"] },
+      { label: "Side View", key: "side", type: "image", aliases: ["Side View", "Generated Side View", "Side"] },
+      { label: "Back View", key: "back", type: "image", aliases: ["Back View", "Generated Back View", "Back"] },
+      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View", "Generated Closeup View", "Generated Close Up View", "Generated Close-up View"] },
+    ],
+    reference: [],
+  },
+  designerBlouse: {
+    generated: [
+      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "Front"] },
+      { label: "Generated Back View", key: "back", type: "image", aliases: ["Generated Back View", "Back View", "Back"] },
+      { label: "Generated Detailed View", key: "detail", type: "image", aliases: ["Generated Detailed View", "Detailed View", "Detail View", "Sleeve Detail", "Close-up Detail"] },
+    ],
+    reference: [],
+  },
+  shawl: {
+    generated: [
+      { label: "Full Drape View", key: "fullDrape", type: "image", aliases: ["Full Drape View", "Generated Full Drape View"] },
+      { label: "Shoulder Styling View", key: "shoulder", type: "image", aliases: ["Shoulder Styling View", "Shoulder View", "Generated Shoulder View"] },
+      { label: "Folded Texture View", key: "foldedTexture", type: "image", aliases: ["Folded Texture View", "Texture View", "Generated Folded Texture View"] },
+      { label: "Close-up Border View", key: "closeBorder", type: "image", aliases: ["Close-up Border View", "Closeup Border View", "Border Close-up View"] },
+      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View"] },
+      { label: "Close-up View", key: "close", type: "image", aliases: GENERATED_MEDIA_ALIASES.close },
+    ],
+    reference: [],
+    dynamicGenerated: true,
+  },
+  silkScarf: {
+    generated: [
+      { label: "Flat Lay View", key: "flatLay", type: "image", aliases: ["Flat Lay View", "Flatlay View", "Generated Flat Lay", "Generated Flatlay"] },
+      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Shoulder Styling View", "Generated Shoulder View"] },
+      { label: "Close-up View", key: "close", type: "image", aliases: ["Closeup View", "Close Up View", "Close-up View", "Close-Up View", "Fabric Detail", "Close-up Fabric Detail"] },
+    ],
+    reference: [],
+  },
+  silkStole: {
+    generated: [
+      { label: "Full Length", key: "fullLength", type: "image", aliases: ["Full Length", "Full Length View", "Generated Full Length"] },
+      { label: "Shoulder View", key: "shoulder", type: "image", aliases: ["Shoulder View", "Engaged Shoulder", "Shoulder Styling View", "Generated Shoulder View"] },
+      { label: "Front Facing Neck Wrap", key: "neckWrap", type: "image", aliases: ["Front Facing Neck Wrap", "Neck Wrap View", "Front Neck Wrap", "Generated Neck Wrap"] },
+    ],
+    reference: [],
+  },
+  fabric: {
+    generated: [
+      { label: "Luxury Chair Drape", key: "chairDrape", type: "image", aliases: ["Luxury Chair Drape", "Chair Drape", "Generated Chair Drape"] },
+      { label: "Hanging Ladder Display", key: "ladder", type: "image", aliases: ["Hanging Ladder Display", "Ladder Display", "Generated Hanging Ladder"] },
+      { label: "Fabric Roll + Cascading Drape", key: "rollDrape", type: "image", aliases: ["Fabric Roll + Cascading Drape", "Fabric Roll Cascading Drape", "Roll + Cascading Drape", "Generated Roll Drape"] },
+      { label: "Artistic Spiral Flatlay Close-Up", key: "spiral", type: "image", aliases: ["Artistic Spiral Flatlay Close-Up", "Artistic Spiral Flatlay Closeup", "Spiral Flatlay Close-Up", "Spiral Flatlay", "Generated Spiral Flatlay"] },
+    ],
+    reference: [],
+  },
 };
 
 const SAREE_TABLES = [
@@ -200,6 +292,10 @@ const SAREE_TABLES = [
   },
   {
     name: "Cotton Suits",
+    group: "Salwar Kameez",
+    subcategory: "Cotton Suits",
+    displayName: "Cotton Suits",
+    mediaProfile: "suit",
     tableId: 936059,
     fields: {
       generationStatus: "field_8132747",
@@ -209,6 +305,10 @@ const SAREE_TABLES = [
   },
   {
     name: "Silk Suits",
+    group: "Salwar Kameez",
+    subcategory: "Silk Suits",
+    displayName: "Silk Suits",
+    mediaProfile: "suit",
     tableId: 936060,
     fields: {
       generationStatus: "field_8132764",
@@ -243,7 +343,108 @@ const SAREE_TABLES = [
       comment: "field_8123170",
     },
   },
+  {
+    name: "Men Accessories",
+    displayName: "Men Tie",
+    group: "Accessories",
+    subcategory: "Men Accessories",
+    mediaProfile: "menAccessory",
+    tableId: 936098,
+    fields: {
+      generationStatus: "field_8133054",
+      shopify: "field_8133057",
+      comment: "field_8133056",
+    },
+  },
+  {
+    name: "Dupattas",
+    displayName: "Dupattas",
+    group: "Accessories",
+    subcategory: "Dupattas",
+    mediaProfile: "dupatta",
+    tableId: 936099,
+    fields: {
+      generationStatus: "field_8133069",
+      shopify: "field_8133072",
+      comment: "field_8133070",
+    },
+  },
+  {
+    name: "Designer Blouses",
+    displayName: "Designer Blouses",
+    group: "Accessories",
+    subcategory: "Designer Blouses",
+    mediaProfile: "designerBlouse",
+    tableId: 936100,
+    fields: {
+      generationStatus: "field_8133084",
+      shopify: "field_8133087",
+      comment: "field_8133086",
+    },
+  },
+  {
+    name: "Shawls",
+    displayName: "Shawls",
+    group: "Accessories",
+    subcategory: "Shawls",
+    mediaProfile: "shawl",
+    tableId: 936101,
+    fields: {
+      generationStatus: "field_8133109",
+      shopify: "field_8133115",
+      comment: "field_8133113",
+    },
+  },
+  {
+    name: "Silk Scarves",
+    displayName: "Silk Scarves",
+    group: "Accessories",
+    subcategory: "Silk Scarves",
+    mediaProfile: "silkScarf",
+    tableId: 936102,
+    fields: {
+      generationStatus: "field_8133130",
+      shopify: "field_8133133",
+      comment: "field_8133132",
+    },
+  },
+  {
+    name: "Silk Stoles",
+    displayName: "Silk Stoles",
+    group: "Accessories",
+    subcategory: "Silk Stoles",
+    mediaProfile: "silkStole",
+    tableId: 936103,
+    fields: {
+      generationStatus: "field_8133145",
+      shopify: "field_8133148",
+      comment: "field_8133147",
+    },
+  },
+  {
+    name: "Fabrics",
+    displayName: "Silk Fabric",
+    group: "Fabric",
+    subcategory: "Silk Fabric",
+    mediaProfile: "fabric",
+    tableId: 948124,
+    fields: {
+      generationStatus: "field_8253764",
+      shopify: "field_8253767",
+      comment: "field_8253765",
+    },
+  },
 ];
+
+SAREE_TABLES.forEach((table) => {
+  if (!table.displayName) table.displayName = table.name;
+  if (!table.group) table.group = /suits?/i.test(table.name) ? "Salwar Kameez" : "Saree Collections";
+  if (!table.subcategory) table.subcategory = table.displayName;
+  if (!table.mediaProfile) table.mediaProfile = table.group === "Salwar Kameez" ? "suit" : "saree";
+  table.generationStatusFieldId = numericFieldId(table.fields.generationStatus);
+  table.shopifyNotesFieldId = numericFieldId(table.fields.shopify);
+  table.commentFieldId = numericFieldId(table.fields.comment);
+});
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -322,6 +523,10 @@ function legacyCacheKey(...parts) {
   return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}:v1`;
 }
 
+function versionedCacheKey(version, ...parts) {
+  return `${CACHE_PREFIX}${parts.map((part) => String(part)).join(":")}:${version}`;
+}
+
 function stableQueryKey(query) {
   return Object.entries(query || {})
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -333,6 +538,7 @@ function stableQueryKey(query) {
 function productCacheKey(query = {}) {
   if (query.tableId) return cacheKey("products", "table", query.tableId);
   if (query.collection) return cacheKey("products", "collection", normalizeLookupName(query.collection));
+  if (query.group) return cacheKey("products", "group", normalizeLookupName(query.group));
   return cacheKey("products", "all");
 }
 
@@ -467,7 +673,16 @@ function getTableConfig(tableId) {
 
 function getTableConfigByName(name) {
   const target = normalizeLookupName(name);
-  return SAREE_TABLES.find((table) => normalizeLookupName(table.name) === target);
+  return SAREE_TABLES.find((table) =>
+    normalizeLookupName(table.name) === target ||
+    normalizeLookupName(table.displayName) === target ||
+    normalizeLookupName(table.subcategory) === target
+  );
+}
+
+function getTableConfigsByGroup(groupName) {
+  const target = normalizeLookupName(groupName);
+  return SAREE_TABLES.filter((table) => normalizeLookupName(table.group) === target);
 }
 
 function normalizeLookupName(value) {
@@ -486,7 +701,9 @@ function slugify(value) {
 }
 
 function collectionGroupName(tableName) {
-  return ["Cotton Suits", "Silk Suits"].includes(tableName) ? "Salwar Kameez" : "Saree Collections";
+  if (typeof tableName === "object" && tableName) return tableName.group || "Saree Collections";
+  const table = getTableConfigByName(tableName);
+  return table?.group || "Saree Collections";
 }
 
 function getSelectValue(value) {
@@ -519,7 +736,7 @@ function readField(row, fieldId, fallbackName, fieldMap = null) {
 function normalizeFieldName(name) {
   return String(name || "")
     .toLowerCase()
-    .replace(/[\s_-]+/g, "")
+    .replace(/[\s_+\-]+/g, "")
     .trim();
 }
 
@@ -661,39 +878,39 @@ function findFieldByAliases(fieldMap, aliases) {
 }
 
 function detectMediaFields(fieldMap) {
+  const allGenerated = Object.fromEntries(
+    Object.entries(MEDIA_PROFILES).flatMap(([, profile]) =>
+      profile.generated.map((item) => [item.key, item.aliases])
+    )
+  );
+  const allReference = Object.fromEntries(
+    Object.entries(MEDIA_PROFILES).flatMap(([, profile]) =>
+      profile.reference.map((item) => [item.key, item.aliases])
+    )
+  );
+
   return {
     generatedMediaFields: Object.fromEntries(
-      Object.entries(GENERATED_MEDIA_ALIASES).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
+      Object.entries(allGenerated).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
     ),
     referenceMediaFields: Object.fromEntries(
-      Object.entries(REFERENCE_MEDIA_ALIASES).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
+      Object.entries(allReference).map(([key, aliases]) => [key, findFieldByAliases(fieldMap, aliases)])
     ),
   };
 }
 
 function sampleMediaAvailability(rows, tableConfig, fieldMap) {
-  const counts = {
-    rowsChecked: rows.length,
-    frontCount: 0,
-    sideCount: 0,
-    backCount: 0,
-    closeCount: 0,
-    gridCount: 0,
-    videoCount: 0,
-    fullSuitCount: 0,
-    suitBackCount: 0,
-  };
+  const profile = MEDIA_PROFILES[tableConfig.mediaProfile] || MEDIA_PROFILES.saree;
+  const counts = { rowsChecked: rows.length };
+  [...profile.generated, ...profile.reference].forEach((item) => {
+    counts[`${item.key}Count`] = 0;
+  });
 
   rows.forEach((row) => {
     const images = normalizeProduct(row, tableConfig, fieldMap).images;
-    if (images.front) counts.frontCount += 1;
-    if (images.side) counts.sideCount += 1;
-    if (images.back) counts.backCount += 1;
-    if (images.close) counts.closeCount += 1;
-    if (images.grid) counts.gridCount += 1;
-    if (images.video) counts.videoCount += 1;
-    if (images.fullSuit) counts.fullSuitCount += 1;
-    if (images.suitBack) counts.suitBackCount += 1;
+    [...profile.generated, ...profile.reference].forEach((item) => {
+      if (images[item.key]) counts[`${item.key}Count`] += 1;
+    });
   });
 
   return counts;
@@ -709,8 +926,14 @@ function validateTableFields(tableConfig, fieldMap) {
 
   if (!generationField) {
     warnings.push(`Configured Generation Status field ${tableConfig.fields.generationStatus} was not found.`);
-  } else if (!getSelectOptionValues(generationField).includes(GENERATION_STATUS_FAILED_VALUE)) {
-    warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option Failed.`);
+  } else {
+    const generationOptions = getSelectOptionValues(generationField);
+    if (!generationOptions.includes("Approved")) {
+      warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option Approved.`);
+    }
+    if (!generationOptions.includes(GENERATION_STATUS_FAILED_VALUE)) {
+      warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option Failed.`);
+    }
   }
 
   if (!shopifyField) {
@@ -791,6 +1014,39 @@ function parsePrice(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function mediaProfileFor(tableConfig) {
+  return MEDIA_PROFILES[tableConfig.mediaProfile] || MEDIA_PROFILES.saree;
+}
+
+function buildMediaItems(namedRow, fieldMap, tableConfig, type) {
+  const profile = mediaProfileFor(tableConfig);
+  const configuredItems = profile[type] || [];
+  const items = [];
+  const seenKeys = new Set();
+
+  configuredItems.forEach((item) => {
+    const url = getFileUrl(getByNormalizedAliases(namedRow, item.aliases || []));
+    items.push({ key: item.key, label: item.label, type: item.type || "image", url });
+    seenKeys.add(item.key);
+  });
+
+  if (type === "generated" && profile.dynamicGenerated) {
+    (fieldMap?.fields || []).forEach((field) => {
+      if (!/file/i.test(String(field.type || ""))) return;
+      const fieldName = String(field.name || "");
+      if (!/(view|generated|drape|texture|border|close|front|shoulder|folded)/i.test(fieldName)) return;
+      const key = slugify(fieldName).replace(/-/g, "_");
+      if (seenKeys.has(key)) return;
+      const url = getFileUrl(getByNormalizedAliases(namedRow, [fieldName, `field_${field.id}`]));
+      if (!url) return;
+      items.push({ key, label: fieldName, type: "image", url });
+      seenKeys.add(key);
+    });
+  }
+
+  return items;
+}
+
 function isApprovedGeneration(row, tableConfig, fieldMap = null) {
   const status = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
   const value = getSelectValue(status);
@@ -802,28 +1058,23 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   const shopify = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
   const comment = readField(row, tableConfig.fields.comment, "Comment", fieldMap);
   const namedRow = rowWithFieldNames(row, fieldMap?.fields || []);
-  const images = {
-    full: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.full)),
-    blouse: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.blouse)),
-    pallu: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.pallu)),
-    border: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.border)),
-    fullSuit: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.fullSuit)),
-    suitBack: getFileUrl(getByNormalizedAliases(namedRow, REFERENCE_MEDIA_ALIASES.suitBack)),
-    front: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.front)),
-    side: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.side)),
-    back: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.back)),
-    close: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.close)),
-    grid: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.grid)),
-    video: getFileUrl(getByNormalizedAliases(namedRow, GENERATED_MEDIA_ALIASES.video)),
-  };
+  const generatedMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "generated");
+  const referenceMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "reference");
+  const images = Object.fromEntries(
+    [...referenceMedia, ...generatedMedia].map((item) => [item.key, item.url])
+  );
 
   return {
     id: `${tableConfig.tableId}:${row.id}`,
     rowId: row.id,
     tableId: tableConfig.tableId,
     collectionName: tableConfig.name,
+    displayName: tableConfig.displayName,
+    group: tableConfig.group,
+    subcategory: tableConfig.subcategory,
+    mediaProfile: tableConfig.mediaProfile,
     code: readField(row, null, "Product Code", fieldMap) || readField(row, null, "SKU", fieldMap) || readField(row, null, "Product SKU", fieldMap) || `ROW-${row.id}`,
-    title: readField(row, null, "Product Title", fieldMap) || readField(row, null, "Title", fieldMap) || "Untitled Saree",
+    title: readField(row, null, "Product Title", fieldMap) || readField(row, null, "Title", fieldMap) || `Untitled ${tableConfig.displayName}`,
     category: getSelectValue(readField(row, null, "Category", fieldMap)) || tableConfig.name,
     price: parsePrice(readField(row, null, "Price (INR)", fieldMap) || readField(row, null, "Price", fieldMap) || readField(row, null, "Pri...", fieldMap)),
     generationStatus: getSelectValue(generationStatus),
@@ -838,6 +1089,8 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
       approvel: readField(row, null, "Approvel", fieldMap),
     },
     images,
+    generatedMedia,
+    referenceMedia,
   };
 }
 
@@ -1044,6 +1297,34 @@ app.get("/api/health", (req, res) => {
   }
 });
 
+function buildCollectionGroups(collections) {
+  const groups = [];
+  const byName = new Map();
+
+  collections.forEach((collection) => {
+    const groupName = collection.group || "Saree Collections";
+    if (!byName.has(groupName)) {
+      const group = { name: groupName, count: 0, children: [] };
+      byName.set(groupName, group);
+      groups.push(group);
+    }
+
+    const group = byName.get(groupName);
+    group.count += Number(collection.count || 0);
+    group.children.push({
+      name: collection.displayName || collection.name,
+      collectionName: collection.name,
+      displayName: collection.displayName || collection.name,
+      subcategory: collection.subcategory || collection.displayName || collection.name,
+      tableId: collection.tableId,
+      count: collection.count || 0,
+      error: collection.error || null,
+    });
+  });
+
+  return groups;
+}
+
 async function buildCollectionsPayload() {
   const collections = [];
   const errors = [];
@@ -1053,18 +1334,24 @@ async function buildCollectionsPayload() {
       const { approvedRows } = await fetchApprovedForTable(tableConfig);
       collections.push({
         name: tableConfig.name,
+        displayName: tableConfig.displayName,
         tableId: tableConfig.tableId,
         slug: slugify(tableConfig.name),
-        group: collectionGroupName(tableConfig.name),
+        group: collectionGroupName(tableConfig),
+        subcategory: tableConfig.subcategory,
+        mediaProfile: tableConfig.mediaProfile,
         count: approvedRows.length,
         error: null,
       });
     } catch (error) {
       const item = {
         name: tableConfig.name,
+        displayName: tableConfig.displayName,
         tableId: tableConfig.tableId,
         slug: slugify(tableConfig.name),
-        group: collectionGroupName(tableConfig.name),
+        group: collectionGroupName(tableConfig),
+        subcategory: tableConfig.subcategory,
+        mediaProfile: tableConfig.mediaProfile,
         count: 0,
         error: error.baserow || error.message,
       };
@@ -1078,16 +1365,19 @@ async function buildCollectionsPayload() {
     SAREE_TABLES.findIndex((table) => table.tableId === b.tableId)
   );
 
+  const groups = buildCollectionGroups(collections);
+
   return {
     success: true,
     total: collections.reduce((sum, item) => sum + item.count, 0),
+    groups,
     collections,
     errors,
   };
 }
 
 async function buildProductsPayload(query = {}) {
-  const { tableId, collection, search, status, sort } = query;
+  const { tableId, collection, group, search, status, sort } = query;
   let tablesToFetch = SAREE_TABLES;
   let mode = "all-tables";
 
@@ -1100,9 +1390,18 @@ async function buildProductsPayload(query = {}) {
     }
     tablesToFetch = [tableConfig];
     mode = "table";
+  } else if (group) {
+    tablesToFetch = getTableConfigsByGroup(group);
+    mode = "group";
+    if (!tablesToFetch.length) {
+      const error = new Error(`Unknown group ${group}`);
+      error.status = 400;
+      throw error;
+    }
   } else if (collection) {
-    if (normalizeLookupName(collection) === normalizeLookupName("Salwar Kameez")) {
-      tablesToFetch = [getTableConfig(936059), getTableConfig(936060)].filter(Boolean);
+    const groupTables = getTableConfigsByGroup(collection);
+    if (groupTables.length) {
+      tablesToFetch = groupTables;
       mode = "group";
     } else {
       const tableConfig = getTableConfigByName(collection);
@@ -1132,18 +1431,24 @@ async function buildProductsPayload(query = {}) {
       products.push(...result.products);
       collections.push({
         name: tableConfig.name,
+        displayName: tableConfig.displayName,
         tableId: tableConfig.tableId,
         slug: slugify(tableConfig.name),
-        group: collectionGroupName(tableConfig.name),
+        group: collectionGroupName(tableConfig),
+        subcategory: tableConfig.subcategory,
+        mediaProfile: tableConfig.mediaProfile,
         count: result.products.length,
         error: null,
       });
     } catch (error) {
       const item = {
         name: tableConfig.name,
+        displayName: tableConfig.displayName,
         tableId: tableConfig.tableId,
         slug: slugify(tableConfig.name),
-        group: collectionGroupName(tableConfig.name),
+        group: collectionGroupName(tableConfig),
+        subcategory: tableConfig.subcategory,
+        mediaProfile: tableConfig.mediaProfile,
         count: 0,
         error: error.baserow || error.message,
       };
@@ -1158,11 +1463,13 @@ async function buildProductsPayload(query = {}) {
   );
 
   const filteredProducts = applyProductFilters(products, { search, status, sort });
+  const groups = buildCollectionGroups(collections);
 
   return {
     success: true,
     count: filteredProducts.length,
     products: filteredProducts,
+    groups,
     collections,
     errors,
     debug: {
@@ -1339,11 +1646,16 @@ app.get("/api/cache/status", async (req, res) => {
         rowId: productSample.rowId,
         code: productSample.code,
         title: productSample.title,
+        group: productSample.group,
         category: productSample.category,
         collectionName: productSample.collectionName,
+        subcategory: productSample.subcategory,
+        mediaProfile: productSample.mediaProfile,
       } : null,
       categoryMappings: SAREE_TABLES.map((table) => ({
-        name: table.name,
+        name: table.displayName || table.name,
+        collectionName: table.name,
+        group: table.group,
         tableId: table.tableId,
         count: cachedCollections?.collections?.find((item) => item.tableId === table.tableId)?.count ?? null,
       })),
@@ -1359,6 +1671,8 @@ app.post("/api/cache/refresh", async (req, res) => {
       cacheDelete(legacyCacheKey("collections")),
       cacheDelete(legacyCacheKey("diagnose", "all")),
       cacheDelete(legacyCacheKey("diagnose")),
+      cacheDelete(versionedCacheKey("v2", "collections")),
+      cacheDelete(versionedCacheKey("v2", "diagnose")),
       cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
     ]);
 
@@ -1411,18 +1725,27 @@ app.get("/api/baserow/diagnose", async (req, res) => {
         const validation = validateTableFields(tableConfig, fieldMap);
         const mediaFields = detectMediaFields(fieldMap);
         const mediaWarnings = [];
-        const isSuitTable = /suits?/i.test(tableConfig.name);
+        const mediaProfile = mediaProfileFor(tableConfig);
 
-        if (isSuitTable) {
-          if (!mediaFields.referenceMediaFields.fullSuit) mediaWarnings.push("Full Suit Image field was not found.");
-          if (!mediaFields.referenceMediaFields.suitBack) mediaWarnings.push("Back Image field was not found.");
-        } else if (!mediaFields.generatedMediaFields.close) {
-          mediaWarnings.push("Closeup View field or closeup alias was not found.");
-        }
+        mediaProfile.generated.forEach((item) => {
+          if (!findFieldByAliases(fieldMap, item.aliases || [])) {
+            mediaWarnings.push(`${item.label} generated media field was not detected for profile ${tableConfig.mediaProfile}.`);
+          }
+        });
+
+        mediaProfile.reference.forEach((item) => {
+          if (!findFieldByAliases(fieldMap, item.aliases || [])) {
+            mediaWarnings.push(`${item.label} reference media field was not detected for profile ${tableConfig.mediaProfile}.`);
+          }
+        });
 
         tables.push({
           name: tableConfig.name,
-          collection: tableConfig.name,
+          displayName: tableConfig.displayName,
+          collection: tableConfig.displayName,
+          group: tableConfig.group,
+          subcategory: tableConfig.subcategory,
+          mediaProfile: tableConfig.mediaProfile,
           tableId: tableConfig.tableId,
           readAccess: true,
           approvedRows: approvedRows.length,
@@ -1439,7 +1762,11 @@ app.get("/api/baserow/diagnose", async (req, res) => {
       } catch (error) {
         tables.push({
           name: tableConfig.name,
-          collection: tableConfig.name,
+          displayName: tableConfig.displayName,
+          collection: tableConfig.displayName,
+          group: tableConfig.group,
+          subcategory: tableConfig.subcategory,
+          mediaProfile: tableConfig.mediaProfile,
           tableId: tableConfig.tableId,
           readAccess: false,
           approvedRows: 0,
