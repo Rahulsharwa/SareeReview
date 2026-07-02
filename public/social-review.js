@@ -1,5 +1,6 @@
 
 const SOCIAL_API = {
+  reviewAuth: "/api/review-auth",
   reviewData: "/api/review-data",
   updatePlatformPost: "/api/update-platform-post",
   approveContent: "/api/approve-content",
@@ -61,7 +62,25 @@ const socialState = {
   currentPlatform: null
 };
 
-async function socialApiCall(url, options = {}) {
+async function socialAuthenticate() {
+  const password = window.prompt("Enter Social Media Review password");
+  if (!password) throw new Error("Review password required");
+
+  const response = await fetch(SOCIAL_API.reviewAuth, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "Review authentication failed");
+  }
+
+  return data;
+}
+
+async function socialApiCall(url, options = {}, retryAuth = true) {
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -73,6 +92,11 @@ async function socialApiCall(url, options = {}) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+
+  if (response.status === 401 && retryAuth && data.error === "Review password required.") {
+    await socialAuthenticate();
+    return socialApiCall(url, options, false);
+  }
 
   if (!response.ok) {
     throw new Error(data.error || data.message || `API failed: ${response.status}`);

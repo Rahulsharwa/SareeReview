@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { Redis } from "@upstash/redis";
 import { createClient } from "redis";
@@ -35,6 +36,8 @@ const SOCIAL_CACHE_VERSION = "v1";
 const SOCIAL_CACHE_KEY = `${CACHE_PREFIX}social:review-data:${SOCIAL_CACHE_VERSION}`;
 const SOCIAL_CACHE_TTL_SECONDS = Number(process.env.SOCIAL_CACHE_TTL_SECONDS || 60);
 const SOCIAL_REVIEW_NOTE_FIELD = process.env.SOCIAL_REVIEW_NOTE_FIELD || "Review Note";
+const APP_REVIEW_PASSWORD = process.env.APP_REVIEW_PASSWORD || "";
+const SOCIAL_AUTH_COOKIE = "jsh_social_review";
 
 const SOCIAL_TABLES = {
   Dashboard: 924895,
@@ -1394,6 +1397,36 @@ function safeBaserowError(error) {
   return { message: error.message || "Baserow request failed" };
 }
 
+function socialAuthToken() {
+  if (!APP_REVIEW_PASSWORD) return "";
+  return crypto
+    .createHash("sha256")
+    .update(`social-review:${APP_REVIEW_PASSWORD}`)
+    .digest("hex");
+}
+
+function getCookieValue(req, name) {
+  const cookies = String(req.headers.cookie || "").split(";").map((item) => item.trim());
+  const prefix = `${name}=`;
+  const cookie = cookies.find((item) => item.startsWith(prefix));
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : "";
+}
+
+function secureTokenEquals(provided, expected) {
+  if (!provided || !expected || provided.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
+function requireSocialReviewAuth(req, res, next) {
+  if (!APP_REVIEW_PASSWORD) return next();
+  const expected = socialAuthToken();
+  const provided = getCookieValue(req, SOCIAL_AUTH_COOKIE) || String(req.headers["x-social-review-token"] || "");
+  if (secureTokenEquals(provided, expected)) {
+    return next();
+  }
+  return res.status(401).json({ ok: false, error: "Review password required." });
+}
+
 async function fetchSocialBaserowJson(pathname, options = {}) {
   assertConfig();
   const response = await fetch(`${BASEROW_BASE_URL}${pathname}`, {
@@ -2137,7 +2170,27 @@ app.get("/api/baserow/diagnose", async (req, res) => {
   }
 });
 
-app.get("/api/review-data", async (req, res) => {
+app.post("/api/review-auth", (req, res) => {
+  if (!APP_REVIEW_PASSWORD) {
+    return res.json({ ok: true, authRequired: false });
+  }
+
+  const { password = "" } = req.body || {};
+  if (password !== APP_REVIEW_PASSWORD) {
+    return res.status(401).json({ ok: false, error: "Invalid review password." });
+  }
+
+  res.cookie(SOCIAL_AUTH_COOKIE, socialAuthToken(), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 12,
+    path: "/",
+  });
+  return res.json({ ok: true, authRequired: true });
+});
+
+app.get("/api/review-data", requireSocialReviewAuth, async (req, res) => {
   try {
     const refresh = String(req.query.refresh || "") === "1";
     if (!refresh) {
@@ -2154,7 +2207,7 @@ app.get("/api/review-data", async (req, res) => {
   }
 });
 
-app.post("/api/update-platform-post", async (req, res) => {
+app.post("/api/update-platform-post", requireSocialReviewAuth, async (req, res) => {
   try {
     const { platform, tableId, rowId, values = {} } = req.body || {};
     validateSocialPlatform(platform, tableId, rowId);
@@ -2172,7 +2225,7 @@ app.post("/api/update-platform-post", async (req, res) => {
   }
 });
 
-app.post("/api/approve-content", async (req, res) => {
+app.post("/api/approve-content", requireSocialReviewAuth, async (req, res) => {
   try {
     const { dashboardId } = req.body || {};
     if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
@@ -2189,7 +2242,7 @@ app.post("/api/approve-content", async (req, res) => {
   }
 });
 
-app.post("/api/reject-content", async (req, res) => {
+app.post("/api/reject-content", requireSocialReviewAuth, async (req, res) => {
   try {
     const { dashboardId, reviewNote = "" } = req.body || {};
     if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
