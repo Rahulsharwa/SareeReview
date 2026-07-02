@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Janardhana Silk House — Saree Review Portal</title>
+  <link rel="stylesheet" href="/social-review.css" />
   <!-- Live Baserow version: frontend calls backend /api/products. Token stays in backend .env only. -->
   <style>
     :root {
@@ -62,6 +63,36 @@
       align-items: center;
       gap: 18px;
       min-width: 0;
+    }
+
+    .review-mode-switch {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 8px;
+      margin: 18px 0;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fffaf2;
+      box-shadow: 0 8px 20px rgba(74,44,24,.06);
+    }
+
+    .mode-tab {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 11px 18px;
+      font-weight: 900;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .mode-tab.active {
+      background: var(--maroon);
+      color: #fff;
+      border-color: var(--maroon);
+      box-shadow: 0 10px 22px rgba(122,15,29,.16);
     }
 
     .logo-mark {
@@ -1168,6 +1199,12 @@
       </div>
     </header>
 
+    <div class="review-mode-switch">
+      <button id="sareeReviewTab" class="mode-tab active" type="button">Saree Review</button>
+      <button id="socialReviewTab" class="mode-tab" type="button">Social Media Review</button>
+    </div>
+
+    <section id="sareeReviewApp">
     <section class="section-card section-pad">
       <div class="collection-head">
         <span>Collections Category Filter</span>
@@ -1247,7 +1284,130 @@
 
       <section class="mobile-preview section-card section-pad" id="mobilePreview"></section>
     </main>
+    </section>
+
+    <section id="socialReviewApp" class="social-app" hidden>
+      <header class="social-topbar">
+        <div>
+          <h1 class="social-title">Social Media Review</h1>
+          <div class="social-sub">Date-wise Dashboard containers. Each container includes all 7 platform posts for approval and edits.</div>
+        </div>
+        <div class="social-top-actions">
+          <button class="social-btn primary" type="button" onclick="loadSocialReviewData({ refresh: true })">Sync</button>
+          <button class="social-btn green" type="button" onclick="approveSocialVisible()">Approve visible</button>
+        </div>
+      </header>
+
+      <section class="social-sync-card">
+        <div class="social-sync-left">
+          <span class="social-sync-pill">Backend Connected</span>
+          <span class="social-small-muted" id="socialLastSyncText">No sync yet</span>
+        </div>
+        <div>
+          <div class="social-small-muted">Frontend only calls internal API routes. Token stays on backend.</div>
+          <div class="social-field-id-note">Dashboard field IDs mapped: link fields + platform post image fields.</div>
+        </div>
+      </section>
+
+      <nav class="social-tabs" id="socialTabs"></nav>
+
+      <section class="social-filters">
+        <div class="social-filter-left">
+          <select id="socialStatusFilter" onchange="renderSocialReview()">
+            <option value="All">All statuses</option>
+            <option value="approval">Contains approval</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="posted">Posted</option>
+          </select>
+          <select id="socialPlatformFilter" onchange="renderSocialReview()">
+            <option value="All">All platforms</option>
+            <option>Instagram</option>
+            <option>Facebook</option>
+            <option>Linkedin</option>
+            <option>Pinterest</option>
+            <option>Google Business Profile</option>
+            <option>Reddit</option>
+            <option>X</option>
+          </select>
+          <input id="socialSearchInput" class="social-search" placeholder="Search content goal, caption, platform row ID..." oninput="renderSocialReview()" />
+        </div>
+        <div class="social-filter-right">
+          <select id="socialSortFilter" onchange="renderSocialReview()">
+            <option value="dateDesc">Latest date</option>
+            <option value="dateAsc">Old date</option>
+            <option value="pendingFirst">Pending first</option>
+          </select>
+        </div>
+      </section>
+
+      <main id="socialDateGroups"><div class="social-loader">Click Sync to load social review data.</div></main>
+    </section>
   </div>
+
+  <div id="socialEditorBackdrop" class="social-editor-backdrop">
+    <aside class="social-editor">
+      <header class="social-editor-header">
+        <div>
+          <h2 id="socialEditorTitle">Edit Platform Post</h2>
+          <p id="socialEditorSub">Dashboard content set</p>
+        </div>
+        <button class="social-close-btn" type="button" onclick="closeSocialEditor()">x</button>
+      </header>
+      <main class="social-editor-body">
+        <section class="social-edit-left">
+          <label class="social-label">caption</label>
+          <textarea id="socialCaptionInput" class="social-content-area"></textarea>
+          <div class="social-char-count"><span id="socialCharCount">0</span> chars</div>
+          <div class="social-media-preview-title">media preview</div>
+          <div class="social-media-preview"><img id="socialEditorImage" src="" alt="media preview" /></div>
+        </section>
+        <section class="social-edit-right">
+          <div class="social-right-section">
+            <h3>platforms in this content set</h3>
+            <div class="social-platform-selects" id="socialEditorPlatformPills"></div>
+          </div>
+          <div class="social-right-section">
+            <h3>dashboard data</h3>
+            <div class="social-two">
+              <div class="social-form-field"><label>dashboard row</label><input id="socialDashboardIdInput" readonly /></div>
+              <div class="social-form-field"><label>status</label><input id="socialDashboardStatusInput" readonly /></div>
+            </div>
+            <div class="social-form-field"><label>content type</label><input id="socialContentTypeInput" readonly /></div>
+            <div class="social-form-field"><label>content goal</label><textarea id="socialContentGoalInput" readonly></textarea></div>
+            <div class="social-form-field"><label>why today</label><textarea id="socialWhyTodayInput" readonly></textarea></div>
+          </div>
+          <div class="social-right-section">
+            <h3>platform post data</h3>
+            <div class="social-two">
+              <div class="social-form-field"><label>platform row id</label><input id="socialRowIdInput" readonly /></div>
+              <div class="social-form-field"><label>post id</label><input id="socialPostIdInput" /></div>
+            </div>
+            <div class="social-two">
+              <div class="social-form-field"><label>CTA style</label><input id="socialCtaInput" /></div>
+              <div class="social-form-field"><label>ratio</label><input id="socialRatioInput" /></div>
+            </div>
+            <div class="social-form-field"><label>hook direction</label><input id="socialHookInput" /></div>
+            <div class="social-form-field"><label>image prompt</label><textarea id="socialPromptInput"></textarea></div>
+            <div class="social-form-field"><label>image URL</label><input id="socialImageUrlInput" readonly /></div>
+            <div class="social-form-field"><label>review note</label><textarea id="socialReviewNoteInput" placeholder="Correction note for rejection or revision..."></textarea></div>
+          </div>
+          <div class="social-right-section">
+            <h3>quality check</h3>
+            <div class="social-quality-grid" id="socialQualityGrid"></div>
+          </div>
+        </section>
+      </main>
+      <footer class="social-editor-footer">
+        <button class="social-btn" type="button" onclick="closeSocialEditor()">Cancel</button>
+        <button class="social-btn red" type="button" onclick="rejectCurrentSocialSet()">Reject content</button>
+        <button class="social-btn black" type="button" onclick="updateCurrentSocialPlatform()">Update post</button>
+        <button class="social-btn green" type="button" onclick="approveCurrentSocialSet()">Approve content</button>
+      </footer>
+    </aside>
+  </div>
+
+  <div id="socialToast" class="social-toast"></div>
 
   <div class="modal-backdrop" id="requestModal">
     <div class="modal">
@@ -2271,6 +2431,26 @@
     setInterval(() => fetchProductsFromAPI(), 15000);
 
     fetchCollections().finally(() => fetchProductsFromAPI());
+  </script>
+  <script src="/social-review.js"></script>
+  <script>
+    const reviewModeState = { activeMode: "saree" };
+
+    function setReviewMode(mode) {
+      reviewModeState.activeMode = mode;
+      document.getElementById("sareeReviewApp").hidden = mode !== "saree";
+      document.getElementById("socialReviewApp").hidden = mode !== "social";
+      document.getElementById("sareeReviewTab").classList.toggle("active", mode === "saree");
+      document.getElementById("socialReviewTab").classList.toggle("active", mode === "social");
+
+      if (mode === "social" && !window.__socialReviewLoaded) {
+        loadSocialReviewData({ refresh: false });
+        window.__socialReviewLoaded = true;
+      }
+    }
+
+    document.getElementById("sareeReviewTab").addEventListener("click", () => setReviewMode("saree"));
+    document.getElementById("socialReviewTab").addEventListener("click", () => setReviewMode("social"));
   </script>
 </body>
 </html>

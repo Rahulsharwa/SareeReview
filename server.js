@@ -15,6 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
+const BASEROW_BASE_URL = process.env.BASEROW_BASE_URL || BASEROW_API_URL;
 const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
 const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
@@ -30,6 +31,52 @@ const CACHE_STALE_IF_ERROR = String(process.env.CACHE_STALE_IF_ERROR || "true").
 const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
 const GENERATION_STATUS_FAILED_VALUE = "Failed";
+const SOCIAL_CACHE_VERSION = "v1";
+const SOCIAL_CACHE_KEY = `${CACHE_PREFIX}social:review-data:${SOCIAL_CACHE_VERSION}`;
+const SOCIAL_CACHE_TTL_SECONDS = Number(process.env.SOCIAL_CACHE_TTL_SECONDS || 60);
+const SOCIAL_REVIEW_NOTE_FIELD = process.env.SOCIAL_REVIEW_NOTE_FIELD || "Review Note";
+
+const SOCIAL_TABLES = {
+  Dashboard: 924895,
+  Instagram: 928142,
+  Facebook: 948370,
+  Linkedin: 948372,
+  Pinterest: 948373,
+  GBP: 928145,
+  Reddit: 928146,
+  X: 929579,
+  Product: 928930,
+};
+
+const SOCIAL_DASHBOARD_FIELD_IDS = {
+  Status: 8026947,
+  Instagram: 8026946,
+  "Instagram Post": 8085571,
+  Facebook: 8255728,
+  "Facebook Post": 8255730,
+  Linkedin: 8255731,
+  "Linkedin Post": 8255733,
+  Pinterest: 8255734,
+  "Pinterest Post": 8255737,
+  "Google Business Profile": 8085396,
+  "Google Business Post": 8085573,
+  Reddit: 8085395,
+  "Reddit Post": 8085575,
+  X: 8085481,
+  "X Post": 8085577,
+};
+
+const SOCIAL_PLATFORM_MAP = [
+  { key: "Instagram", tableId: 928142, linkField: "Instagram", linkFieldId: 8026946, dashboardImageField: "Instagram Post", dashboardImageFieldId: 8085571, rowImageField: "Image", ratioDefault: "4:5" },
+  { key: "Facebook", tableId: 948370, linkField: "Facebook", linkFieldId: 8255728, dashboardImageField: "Facebook Post", dashboardImageFieldId: 8255730, rowImageField: "Image", ratioDefault: "1:1" },
+  { key: "Linkedin", tableId: 948372, linkField: "Linkedin", linkFieldId: 8255731, dashboardImageField: "Linkedin Post", dashboardImageFieldId: 8255733, rowImageField: "Image", ratioDefault: "4:5" },
+  { key: "Pinterest", tableId: 948373, linkField: "Pinterest", linkFieldId: 8255734, dashboardImageField: "Pinterest Post", dashboardImageFieldId: 8255737, rowImageField: "Image", ratioDefault: "2:3" },
+  { key: "Google Business Profile", tableId: 928145, linkField: "Google Business Profile", linkFieldId: 8085396, dashboardImageField: "Google Business Post", dashboardImageFieldId: 8085573, rowImageField: "Image", ratioDefault: "1:1" },
+  { key: "Reddit", tableId: 928146, linkField: "Reddit", linkFieldId: 8085395, dashboardImageField: "Reddit Post", dashboardImageFieldId: 8085575, rowImageField: "Image", ratioDefault: "1:1" },
+  { key: "X", tableId: 929579, linkField: "X", linkFieldId: 8085481, dashboardImageField: "X Post", dashboardImageFieldId: 8085577, rowImageField: "Image", ratioDefault: "1:1" },
+];
+
+const SOCIAL_ALLOWED_PATCH_FIELDS = new Set(["Caption", "CTA style", "Prompt", "Ratio", "Hook Direction", "Post ID"]);
 
 const REFERENCE_MEDIA_ALIASES = {
   full: ["Full Saree Image", "Saree Image", "Full Image"],
@@ -1333,6 +1380,173 @@ async function patchBaserowRow(tableId, rowId, payload) {
   return data;
 }
 
+function getFirstLinkedId(value) {
+  if (!Array.isArray(value) || !value.length) return null;
+  const first = value[0];
+  return first?.id || first?.row_id || first?.value || null;
+}
+
+function getFirstFileUrl(value) {
+  return getFileUrls(value)[0] || "";
+}
+
+function safeBaserowError(error) {
+  return { message: error.message || "Baserow request failed" };
+}
+
+async function fetchSocialBaserowJson(pathname, options = {}) {
+  assertConfig();
+  const response = await fetch(`${BASEROW_BASE_URL}${pathname}`, {
+    ...options,
+    headers: {
+      Authorization: `Token ${BASEROW_TOKEN}`,
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.detail || data?.error || `Baserow request failed with ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+async function fetchSocialRows(tableId, { filterApproval = false } = {}) {
+  const params = new URLSearchParams({ user_field_names: "true", size: "200" });
+  if (filterApproval) params.set(`filter__field_${SOCIAL_DASHBOARD_FIELD_IDS.Status}__contains`, "approval");
+  const pathname = `/api/database/rows/table/${tableId}/?${params.toString()}`;
+  const data = await fetchSocialBaserowJson(pathname);
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+async function fetchSocialDashboardRows() {
+  try {
+    return await fetchSocialRows(SOCIAL_TABLES.Dashboard, { filterApproval: true });
+  } catch (error) {
+    const rows = await fetchSocialRows(SOCIAL_TABLES.Dashboard);
+    return rows.filter((row) => getSelectValue(row.Status).toLowerCase().includes("approval"));
+  }
+}
+
+async function fetchSocialRow(tableId, rowId) {
+  if (!rowId) return null;
+  return fetchSocialBaserowJson(`/api/database/rows/table/${tableId}/${rowId}/?user_field_names=true`);
+}
+
+function readSocialField(row, name, fieldId = null) {
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, name)) return row[name];
+  if (fieldId && Object.prototype.hasOwnProperty.call(row, `field_${fieldId}`)) return row[`field_${fieldId}`];
+  return null;
+}
+
+function normalizeSocialText(value) {
+  return getSelectValue(value) || (value === null || value === undefined ? "" : String(value));
+}
+
+function normalizeSocialContentSet(row, platformRows) {
+  const dashboardId = row.id;
+  const date = row.Date || row.date || row["Post Date"] || row.created_on || "";
+  const status = normalizeSocialText(readSocialField(row, "Status", SOCIAL_DASHBOARD_FIELD_IDS.Status));
+  const platforms = SOCIAL_PLATFORM_MAP.map((platformConfig) => {
+    const linkedId = getFirstLinkedId(readSocialField(row, platformConfig.linkField, platformConfig.linkFieldId));
+    const platformRow = platformRows[platformConfig.key] || null;
+    const rowImage = getFirstFileUrl(readSocialField(platformRow, platformConfig.rowImageField));
+    const dashboardImage = getFirstFileUrl(readSocialField(row, platformConfig.dashboardImageField, platformConfig.dashboardImageFieldId));
+
+    return {
+      platform: platformConfig.key,
+      tableId: platformConfig.tableId,
+      rowId: linkedId,
+      dashboardId,
+      postId: normalizeSocialText(platformRow?.["Post ID"]) || String(linkedId || ""),
+      date: platformRow?.Date || date,
+      hookDirection: normalizeSocialText(platformRow?.["Hook Direction"]),
+      caption: normalizeSocialText(platformRow?.Caption),
+      cta: normalizeSocialText(platformRow?.["CTA style"]),
+      prompt: normalizeSocialText(platformRow?.Prompt),
+      ratio: normalizeSocialText(platformRow?.Ratio) || platformConfig.ratioDefault,
+      image: rowImage || dashboardImage || "",
+      reviewNote: normalizeSocialText(platformRow?.[SOCIAL_REVIEW_NOTE_FIELD]),
+      missing: !linkedId || !platformRow,
+    };
+  });
+
+  return {
+    dashboardId,
+    dashboardNumber: String(row["Dashboard"] || row["Dashboard ID"] || row.id),
+    date,
+    contentType: normalizeSocialText(row["Content Type"] || row.Type),
+    contentGoal: normalizeSocialText(row["Content Goal"] || row.Goal),
+    whyToday: normalizeSocialText(row["Why Today"] || row["Why today"]),
+    status,
+    approvalStatus: normalizeSocialText(row["Approval Status"]) || status,
+    platforms,
+  };
+}
+
+async function buildSocialReviewData() {
+  const dashboardRows = await fetchSocialDashboardRows();
+  const contentSets = await mapWithConcurrency(dashboardRows, 3, async (dashboardRow) => {
+    const platformEntries = await mapWithConcurrency(SOCIAL_PLATFORM_MAP, 4, async (platformConfig) => {
+      const linkedId = getFirstLinkedId(readSocialField(dashboardRow, platformConfig.linkField, platformConfig.linkFieldId));
+      if (!linkedId) return [platformConfig.key, null];
+      try {
+        return [platformConfig.key, await fetchSocialRow(platformConfig.tableId, linkedId)];
+      } catch {
+        return [platformConfig.key, null];
+      }
+    });
+    return normalizeSocialContentSet(dashboardRow, Object.fromEntries(platformEntries));
+  });
+
+  return {
+    ok: true,
+    contentSets,
+    cache: { provider: cacheProvider(), ttlSeconds: SOCIAL_CACHE_TTL_SECONDS },
+  };
+}
+
+function validateSocialPlatform(platform, tableId, rowId) {
+  const config = SOCIAL_PLATFORM_MAP.find((item) => item.key === platform);
+  if (!config) {
+    const error = new Error("Invalid social platform");
+    error.status = 400;
+    throw error;
+  }
+  if (Number(tableId) !== Number(config.tableId)) {
+    const error = new Error("Platform tableId does not match configured table");
+    error.status = 400;
+    throw error;
+  }
+  if (!/^\d+$/.test(String(rowId || ""))) {
+    const error = new Error("Invalid platform rowId");
+    error.status = 400;
+    throw error;
+  }
+  return config;
+}
+
+function sanitizeSocialPatchValues(values = {}) {
+  return Object.fromEntries(
+    Object.entries(values).filter(([key]) => SOCIAL_ALLOWED_PATCH_FIELDS.has(key))
+  );
+}
+
+async function patchSocialRow(tableId, rowId, payload) {
+  return fetchSocialBaserowJson(`/api/database/rows/table/${tableId}/${rowId}/?user_field_names=true`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+async function clearSocialCache() {
+  await cacheDelete(SOCIAL_CACHE_KEY);
+}
+
 function buildApprovePayload(tableConfig) {
   return {
     [tableConfig.fields.shopify]: SHOPIFY_NOTES_APPROVED_VALUE,
@@ -1920,6 +2134,88 @@ app.get("/api/baserow/diagnose", async (req, res) => {
     });
   } catch (error) {
     res.status(error.status || 500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/review-data", async (req, res) => {
+  try {
+    const refresh = String(req.query.refresh || "") === "1";
+    if (!refresh) {
+      const cached = await cacheGet(SOCIAL_CACHE_KEY);
+      if (cached) return res.json({ ...cached, cache: { ...cached.cache, status: "hit" } });
+    }
+
+    const payload = await buildSocialReviewData();
+    await cacheSet(SOCIAL_CACHE_KEY, payload, SOCIAL_CACHE_TTL_SECONDS);
+    res.json({ ...payload, cache: { ...payload.cache, status: "miss" } });
+  } catch (error) {
+    console.error("Social review data failed:", safeBaserowError(error));
+    res.status(error.status || 500).json({ ok: false, error: "Unable to load social review data." });
+  }
+});
+
+app.post("/api/update-platform-post", async (req, res) => {
+  try {
+    const { platform, tableId, rowId, values = {} } = req.body || {};
+    validateSocialPlatform(platform, tableId, rowId);
+    const payload = sanitizeSocialPatchValues(values);
+    if (!Object.keys(payload).length) {
+      return res.status(400).json({ ok: false, error: "No allowed fields provided." });
+    }
+
+    const updated = await patchSocialRow(tableId, rowId, payload);
+    await clearSocialCache();
+    res.json({ ok: true, updated });
+  } catch (error) {
+    console.error("Social platform update failed:", safeBaserowError(error));
+    res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to update platform post." });
+  }
+});
+
+app.post("/api/approve-content", async (req, res) => {
+  try {
+    const { dashboardId } = req.body || {};
+    if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
+
+    await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, {
+      Status: "Approved",
+      "Approval Status": "Approved",
+    });
+    await clearSocialCache();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Social approve failed:", safeBaserowError(error));
+    res.status(error.status || 500).json({ ok: false, error: "Unable to approve content." });
+  }
+});
+
+app.post("/api/reject-content", async (req, res) => {
+  try {
+    const { dashboardId, reviewNote = "" } = req.body || {};
+    if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
+
+    const payload = {
+      Status: "Rejected",
+      "Approval Status": "Rejected",
+    };
+    if (reviewNote) payload[SOCIAL_REVIEW_NOTE_FIELD] = reviewNote;
+
+    let warning = null;
+    try {
+      await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, payload);
+    } catch (error) {
+      if (!reviewNote) throw error;
+      warning = "Review note field not found or not updated";
+      await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, {
+        Status: "Rejected",
+        "Approval Status": "Rejected",
+      });
+    }
+    await clearSocialCache();
+    res.json({ ok: true, ...(warning ? { warning } : {}) });
+  } catch (error) {
+    console.error("Social reject failed:", safeBaserowError(error));
+    res.status(error.status || 500).json({ ok: false, error: "Unable to reject content." });
   }
 });
 
