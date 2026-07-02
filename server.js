@@ -15,13 +15,14 @@ const PORT = process.env.PORT || 3003;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
-const BASEROW_BASE_URL = process.env.BASEROW_BASE_URL || BASEROW_API_URL;
-const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
-const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
+const BASEROW_BASE_URL = process.env.BASEROW_BASE_URL || process.env.BASEROW_API_URL || "https://api.baserow.io";
+const SAREE_BASEROW_DATABASE_ID = process.env.SAREE_BASEROW_DATABASE_ID || process.env.BASEROW_DATABASE_ID || "419522";
+const SAREE_BASEROW_TOKEN = process.env.SAREE_BASEROW_TOKEN || process.env.BASEROW_TOKEN || "";
+const SOCIAL_BASEROW_DATABASE_ID = process.env.SOCIAL_BASEROW_DATABASE_ID || "414089";
+const SOCIAL_BASEROW_TOKEN = process.env.SOCIAL_BASEROW_TOKEN || "";
 const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() !== "false";
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
-const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${BASEROW_DATABASE_ID}:`;
+const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${SAREE_BASEROW_DATABASE_ID}:`;
 const CACHE_VERSION = "v4";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
@@ -728,11 +729,56 @@ async function invalidateProductCache(tableId = null) {
   ]);
 }
 
-function assertConfig() {
-  if (!BASEROW_TOKEN) {
-    const error = new Error("Missing BASEROW_TOKEN in .env");
+const baserowClients = {
+  saree: {
+    databaseId: SAREE_BASEROW_DATABASE_ID,
+    token: SAREE_BASEROW_TOKEN,
+  },
+  social: {
+    databaseId: SOCIAL_BASEROW_DATABASE_ID,
+    token: SOCIAL_BASEROW_TOKEN,
+  },
+};
+
+function getBaserowConfig(portalType) {
+  const config = baserowClients[portalType];
+  if (!config) {
+    throw new Error(`Invalid portalType: ${portalType}`);
+  }
+  return {
+    baseUrl: BASEROW_BASE_URL,
+    databaseId: config.databaseId,
+    token: config.token,
+  };
+}
+
+function assertConfig(portalType = "saree") {
+  const config = getBaserowConfig(portalType);
+  if (!config.token) {
+    const error = new Error(`Missing ${portalType} Baserow token in environment variables`);
     error.status = 500;
     throw error;
+  }
+  if (!config.databaseId) {
+    const error = new Error(`Missing ${portalType} Baserow database ID in environment variables`);
+    error.status = 500;
+    throw error;
+  }
+}
+
+function validateEnv() {
+  const missing = [];
+  if (!SAREE_BASEROW_DATABASE_ID) missing.push("SAREE_BASEROW_DATABASE_ID");
+  if (!SAREE_BASEROW_TOKEN) missing.push("SAREE_BASEROW_TOKEN");
+  if (!SOCIAL_BASEROW_DATABASE_ID) missing.push("SOCIAL_BASEROW_DATABASE_ID");
+  if (!SOCIAL_BASEROW_TOKEN) missing.push("SOCIAL_BASEROW_TOKEN");
+
+  if (missing.length) {
+    const message = `Missing Baserow env variables: ${missing.join(", ")}`;
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(message);
+    }
+    console.warn(`${message}. Affected routes will return a safe configuration error.`);
   }
 }
 
@@ -860,13 +906,29 @@ function isBaserowThrottle(response, data) {
   return response.status === 429 || data?.detail === "Request was throttled.";
 }
 
-async function fetchBaserowJsonWithRetry(url, options, maxAttempts = 4) {
+async function fetchBaserowJsonWithRetry(portalType, pathname, options = {}, maxAttempts = 4) {
+  assertConfig(portalType);
+  const config = getBaserowConfig(portalType);
   let lastResponse = null;
   let lastData = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(url, options);
-    const data = await response.json();
+    const response = await fetch(`${config.baseUrl}${pathname}`, {
+      ...options,
+      headers: {
+        Authorization: `Token ${config.token}`,
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
+    const text = await response.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
 
     if (response.ok || !isBaserowThrottle(response, data) || attempt === maxAttempts) {
       return { response, data };
@@ -880,8 +942,21 @@ async function fetchBaserowJsonWithRetry(url, options, maxAttempts = 4) {
   return { response: lastResponse, data: lastData };
 }
 
+async function baserowFetch(portalType, pathname, options = {}) {
+  const { response, data } = await fetchBaserowJsonWithRetry(portalType, pathname, options, 1);
+  if (!response.ok) {
+    const details = typeof data === "object" ? JSON.stringify(data) : String(data);
+    const error = new Error(`Baserow ${portalType} API failed: ${response.status} ${details}`);
+    error.status = response.status;
+    error.baserow = data;
+    error.errorType = data?.error || null;
+    throw error;
+  }
+  return data;
+}
+
 async function fetchFieldMap(tableId) {
-  assertConfig();
+  assertConfig("saree");
 
   if (fieldMapCache.has(String(tableId))) {
     return fieldMapCache.get(String(tableId));
@@ -898,12 +973,7 @@ async function fetchFieldMap(tableId) {
     return fieldMap;
   }
 
-  const { response, data } = await fetchBaserowJsonWithRetry(`${BASEROW_API_URL}/api/database/fields/table/${tableId}/`, {
-    headers: {
-      Authorization: `Token ${BASEROW_TOKEN}`,
-      Accept: "application/json",
-    },
-  });
+  const { response, data } = await fetchBaserowJsonWithRetry("saree", `/api/database/fields/table/${tableId}/`);
 
   if (!response.ok) {
     const details = typeof data === "object" ? JSON.stringify(data) : String(data);
@@ -1265,7 +1335,7 @@ function applyProductFilters(products, { search, status, sort }) {
 }
 
 async function fetchBaserowRows(tableId) {
-  assertConfig();
+  assertConfig("saree");
 
   let page = 1;
   let allRows = [];
@@ -1277,13 +1347,7 @@ async function fetchBaserowRows(tableId) {
       page: String(page),
     });
 
-    const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/?${params.toString()}`;
-    const { response, data } = await fetchBaserowJsonWithRetry(url, {
-      headers: {
-        Authorization: `Token ${BASEROW_TOKEN}`,
-        Accept: "application/json",
-      },
-    });
+    const { response, data } = await fetchBaserowJsonWithRetry("saree", `/api/database/rows/table/${tableId}/?${params.toString()}`);
 
     if (!response.ok) {
       const details = typeof data === "object" ? JSON.stringify(data) : String(data);
@@ -1352,20 +1416,12 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 async function patchBaserowRow(tableId, rowId, payload) {
-  assertConfig();
+  assertConfig("saree");
 
-  const url = `${BASEROW_API_URL}/api/database/rows/table/${tableId}/${rowId}/`;
-  const response = await fetch(url, {
+  const { response, data } = await fetchBaserowJsonWithRetry("saree", `/api/database/rows/table/${tableId}/${rowId}/`, {
     method: "PATCH",
-    headers: {
-      Authorization: `Token ${BASEROW_TOKEN}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
     body: JSON.stringify(payload),
   });
-
-  const data = await response.json();
 
   if (!response.ok) {
     const details = typeof data === "object" ? JSON.stringify(data) : String(data);
@@ -1428,23 +1484,7 @@ function requireSocialReviewAuth(req, res, next) {
 }
 
 async function fetchSocialBaserowJson(pathname, options = {}) {
-  assertConfig();
-  const response = await fetch(`${BASEROW_BASE_URL}${pathname}`, {
-    ...options,
-    headers: {
-      Authorization: `Token ${BASEROW_TOKEN}`,
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(data?.detail || data?.error || `Baserow request failed with ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  return data;
+  return baserowFetch("social", pathname, options);
 }
 
 async function fetchSocialRows(tableId, { filterApproval = false } = {}) {
@@ -1618,11 +1658,13 @@ function updatePermissionResponse(res, error) {
 
 app.get("/api/health", (req, res) => {
   try {
-    assertConfig();
+    assertConfig("saree");
     res.json({
       success: true,
-      message: "Backend is running. Baserow token is configured.",
-      databaseId: BASEROW_DATABASE_ID,
+      message: "Backend is running. Saree Baserow token is configured.",
+      databaseId: SAREE_BASEROW_DATABASE_ID,
+      socialDatabaseId: SOCIAL_BASEROW_DATABASE_ID,
+      socialConfigured: Boolean(SOCIAL_BASEROW_TOKEN),
       tableMode: "multi-table",
       totalTables: SAREE_TABLES.length,
     });
@@ -2054,7 +2096,7 @@ app.post("/api/cache/refresh", async (req, res) => {
 
 app.get("/api/baserow/diagnose", async (req, res) => {
   try {
-    assertConfig();
+    assertConfig("saree");
     const diagnoseCacheKey = cacheKey("diagnose");
     const cached = await cacheGet(diagnoseCacheKey);
     if (cached) {
@@ -2149,7 +2191,7 @@ app.get("/api/baserow/diagnose", async (req, res) => {
 
     const payload = {
       success: failedTables === 0,
-      databaseId: BASEROW_DATABASE_ID,
+      databaseId: SAREE_BASEROW_DATABASE_ID,
       tables,
       summary: {
         totalTables: SAREE_TABLES.length,
@@ -2276,6 +2318,7 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+validateEnv();
 await initializeCache();
 
 app.listen(PORT, () => {

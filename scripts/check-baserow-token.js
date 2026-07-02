@@ -2,9 +2,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const BASEROW_API_URL = process.env.BASEROW_API_URL || "https://api.baserow.io";
-const BASEROW_DATABASE_ID = process.env.BASEROW_DATABASE_ID || "419522";
-const BASEROW_TOKEN = process.env.BASEROW_TOKEN;
+const BASEROW_BASE_URL = process.env.BASEROW_BASE_URL || process.env.BASEROW_API_URL || "https://api.baserow.io";
+const SAREE_BASEROW_DATABASE_ID = process.env.SAREE_BASEROW_DATABASE_ID || process.env.BASEROW_DATABASE_ID || "419522";
+const SAREE_BASEROW_TOKEN = process.env.SAREE_BASEROW_TOKEN || process.env.BASEROW_TOKEN;
 
 const SAREE_TABLES = [
   { name: "Kanjivaram Silks", tableId: 948083, fields: { generationStatus: "field_8253052", shopify: "field_8253055", comment: "field_8253053" } },
@@ -36,12 +36,6 @@ const SAREE_TABLES = [
   { name: "Fabrics / Silk Fabric", tableId: 948124, fields: { generationStatus: "field_8253764", shopify: "field_8253767", comment: "field_8253765" } },
 ];
 
-function maskToken(token) {
-  if (!token) return "missing";
-  if (token.length <= 8) return "configured-but-too-short";
-  return `${token.slice(0, 4)}...${token.slice(-6)}`;
-}
-
 function getSelectValue(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -61,9 +55,9 @@ async function fetchRows(tableConfig) {
   let hasNext = true;
 
   while (hasNext) {
-    const response = await fetch(`${BASEROW_API_URL}/api/database/rows/table/${tableConfig.tableId}/?size=100&page=${page}`, {
+    const response = await fetch(`${BASEROW_BASE_URL}/api/database/rows/table/${tableConfig.tableId}/?size=100&page=${page}`, {
       headers: {
-        Authorization: `Token ${BASEROW_TOKEN}`,
+        Authorization: `Token ${SAREE_BASEROW_TOKEN}`,
         Accept: "application/json",
       },
     });
@@ -81,14 +75,14 @@ async function fetchRows(tableConfig) {
   return { ok: true, status: 200, data: null, error: null, rows: allRows };
 }
 
-if (!BASEROW_TOKEN) {
-  console.log("[FAIL] BASEROW_TOKEN is missing in .env.");
+if (!SAREE_BASEROW_TOKEN) {
+  console.log("[FAIL] SAREE_BASEROW_TOKEN is missing in .env.");
   process.exitCode = 1;
 } else {
   console.log("Baserow REST token field-ID multi-table check");
-  console.log(`API URL: ${BASEROW_API_URL}`);
-  console.log(`Database ID: ${BASEROW_DATABASE_ID}`);
-  console.log(`Token: ${maskToken(BASEROW_TOKEN)}`);
+  console.log(`API URL: ${BASEROW_BASE_URL}`);
+  console.log(`Saree database ID: ${SAREE_BASEROW_DATABASE_ID}`);
+  console.log("Saree token: configured");
   console.log("");
 
   let accessible = 0;

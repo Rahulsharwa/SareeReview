@@ -9,16 +9,19 @@ npm install
 cp .env.example .env
 ```
 
-Use a REST database token in `.env`:
+Use separate REST database tokens in `.env`:
 
 ```env
-BASEROW_API_URL=https://api.baserow.io
-BASEROW_DATABASE_ID=419522
-BASEROW_TOKEN=your_rest_database_token
+BASEROW_BASE_URL=https://api.baserow.io
+SAREE_BASEROW_DATABASE_ID=419522
+SAREE_BASEROW_TOKEN=your_saree_rest_database_token
+SOCIAL_BASEROW_DATABASE_ID=414089
+SOCIAL_BASEROW_TOKEN=your_social_rest_database_token
+APP_REVIEW_PASSWORD=optional_portal_password
 PORT=3003
 ```
 
-Do not use the MCP endpoint token as `BASEROW_TOKEN`.
+Do not use the MCP endpoint token as a Baserow REST token.
 Do not put tokens in `public/index.html`.
 
 ## Multi-Table Field-ID Mode
@@ -29,12 +32,14 @@ The backend also fetches table field metadata so display fields such as product 
 
 ## Required Token Permissions
 
-The REST database token needs:
+The Saree REST database token needs:
 
 - Read access to every configured saree table.
 - Update access to every configured saree table.
 - Update access to each table-specific `SHOPIFY` field.
 - Update access to each table-specific `Comment` field when present.
+
+The Social Media Review Portal uses a separate `SOCIAL_BASEROW_TOKEN` for Baserow database `414089`.
 
 Approve updates only:
 
