@@ -423,19 +423,20 @@ async function approveSocialSet(dashboardId) {
   if (!set) return;
 
   try {
-    await socialApiCall(SOCIAL_API.approveContent, {
+    const result = await socialApiCall(SOCIAL_API.approveContent, {
       method: "POST",
       body: JSON.stringify({ dashboardId: set.dashboardId })
     });
+
+    set.status = result.status || "Posted";
+    set.approvalStatus = result.status || "Posted";
   } catch (error) {
     showSocialToast(`Approve API failed: ${error.message}`);
     return;
   }
 
-  set.status = "Approved";
-  set.approvalStatus = "Approved";
   renderSocialReview();
-  showSocialToast(`Dashboard #${set.dashboardNumber || set.dashboardId} approved`);
+  showSocialToast(`Dashboard #${set.dashboardNumber || set.dashboardId} marked as Posted`);
 }
 
 function approveSocialVisible() {

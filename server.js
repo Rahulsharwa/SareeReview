@@ -70,6 +70,13 @@ const SOCIAL_DASHBOARD_FIELD_IDS = {
   "X Post": 8085577,
 };
 
+const SOCIAL_STATUS_FIELD_ID = SOCIAL_DASHBOARD_FIELD_IDS.Status;
+const SOCIAL_REVIEW_STATUS = {
+  PENDING_FILTER: "approval",
+  APPROVED_FINAL: "Posted",
+  REJECTED_FINAL: "Rejected",
+};
+
 const SOCIAL_PLATFORM_MAP = [
   { key: "Instagram", tableId: 928142, linkField: "Instagram", linkFieldId: 8026946, dashboardImageField: "Instagram Post", dashboardImageFieldId: 8085571, rowImageField: "Image", ratioDefault: "4:5" },
   { key: "Facebook", tableId: 948370, linkField: "Facebook", linkFieldId: 8255728, dashboardImageField: "Facebook Post", dashboardImageFieldId: 8255730, rowImageField: "Image", ratioDefault: "1:1" },
@@ -1616,6 +1623,52 @@ async function patchSocialRow(tableId, rowId, payload) {
   });
 }
 
+function socialStatusPayload(statusValue, useFieldNames = true) {
+  const optionIds = {
+    [SOCIAL_REVIEW_STATUS.APPROVED_FINAL]: process.env.SOCIAL_STATUS_POSTED_OPTION_ID,
+    [SOCIAL_REVIEW_STATUS.REJECTED_FINAL]: process.env.SOCIAL_STATUS_REJECTED_OPTION_ID,
+  };
+  const optionId = optionIds[statusValue];
+  const value = optionId ? Number(optionId) : statusValue;
+
+  if (useFieldNames) {
+    return { Status: value };
+  }
+
+  return { [`field_${SOCIAL_STATUS_FIELD_ID}`]: value };
+}
+
+async function updateDashboardStatus(dashboardId, statusValue, extra = {}) {
+  if (!/^\d+$/.test(String(dashboardId || ""))) {
+    const error = new Error("dashboardId is required");
+    error.status = 400;
+    throw error;
+  }
+
+  if (![SOCIAL_REVIEW_STATUS.APPROVED_FINAL, SOCIAL_REVIEW_STATUS.REJECTED_FINAL].includes(statusValue)) {
+    const error = new Error(`Invalid social review status: ${statusValue}`);
+    error.status = 400;
+    throw error;
+  }
+
+  const payload = socialStatusPayload(statusValue, true);
+  if (extra.reviewNote) payload[SOCIAL_REVIEW_NOTE_FIELD] = extra.reviewNote;
+
+  try {
+    return await fetchSocialBaserowJson(`/api/database/rows/table/${SOCIAL_TABLES.Dashboard}/${dashboardId}/?user_field_names=true`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  } catch (firstError) {
+    console.warn("Social status update by field name failed. Trying field ID fallback.", safeBaserowError(firstError));
+    const fallbackPayload = socialStatusPayload(statusValue, false);
+    return fetchSocialBaserowJson(`/api/database/rows/table/${SOCIAL_TABLES.Dashboard}/${dashboardId}/?user_field_names=false`, {
+      method: "PATCH",
+      body: JSON.stringify(fallbackPayload),
+    });
+  }
+}
+
 async function clearSocialCache() {
   await cacheDelete(SOCIAL_CACHE_KEY);
 }
@@ -2272,12 +2325,10 @@ app.post("/api/approve-content", requireSocialReviewAuth, async (req, res) => {
     const { dashboardId } = req.body || {};
     if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
 
-    await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, {
-      Status: "Approved",
-      "Approval Status": "Approved",
-    });
+    const status = SOCIAL_REVIEW_STATUS.APPROVED_FINAL;
+    const updated = await updateDashboardStatus(dashboardId, status);
     await clearSocialCache();
-    res.json({ ok: true });
+    res.json({ ok: true, dashboardId, status, updated });
   } catch (error) {
     console.error("Social approve failed:", safeBaserowError(error));
     res.status(error.status || 500).json({ ok: false, error: "Unable to approve content." });
@@ -2289,25 +2340,19 @@ app.post("/api/reject-content", requireSocialReviewAuth, async (req, res) => {
     const { dashboardId, reviewNote = "" } = req.body || {};
     if (!/^\d+$/.test(String(dashboardId || ""))) return res.status(400).json({ ok: false, error: "Invalid dashboardId." });
 
-    const payload = {
-      Status: "Rejected",
-      "Approval Status": "Rejected",
-    };
-    if (reviewNote) payload[SOCIAL_REVIEW_NOTE_FIELD] = reviewNote;
+    const status = SOCIAL_REVIEW_STATUS.REJECTED_FINAL;
 
     let warning = null;
+    let updated = null;
     try {
-      await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, payload);
+      updated = await updateDashboardStatus(dashboardId, status, { reviewNote });
     } catch (error) {
       if (!reviewNote) throw error;
       warning = "Review note field not found or not updated";
-      await patchSocialRow(SOCIAL_TABLES.Dashboard, dashboardId, {
-        Status: "Rejected",
-        "Approval Status": "Rejected",
-      });
+      updated = await updateDashboardStatus(dashboardId, status);
     }
     await clearSocialCache();
-    res.json({ ok: true, ...(warning ? { warning } : {}) });
+    res.json({ ok: true, dashboardId, status, updated, ...(warning ? { warning } : {}) });
   } catch (error) {
     console.error("Social reject failed:", safeBaserowError(error));
     res.status(error.status || 500).json({ ok: false, error: "Unable to reject content." });
