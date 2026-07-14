@@ -13,6 +13,10 @@ const uploadSareeState = {
   selectedGeneratedKey: "front",
   syncTimer: null,
   maxFileSizeMb: 10,
+  detailOpen: false,
+  currentRowId: null,
+  loadingRecent: false,
+  submitting: false,
 };
 
 const UPLOAD_GENERATED_TABS = [
@@ -149,18 +153,65 @@ async function loadUploadStatus() {
 }
 
 async function loadUploadSarees({ refresh = false, force = false } = {}) {
+  return loadRecentUploadSarees({ force: refresh || force, preserveDetail: true, silent: !(refresh || force) });
+}
+
+async function loadRecentUploadSarees(options = {}) {
+  const {
+    force = false,
+    preserveDetail = true,
+    silent = false,
+  } = options;
   const root = document.getElementById("uploadRecentRows");
-  root.innerHTML = `<div class="upload-empty">Loading uploaded sarees...</div>`;
-  try {
-    const url = refresh || force ? `${UPLOAD_API.recent}?refresh=1` : UPLOAD_API.recent;
-    const data = await uploadApiCall(url);
-    uploadSareeState.rows = Array.isArray(data.rows) ? data.rows : [];
-    renderUploadRows();
-    document.getElementById("uploadUpdatedAt").textContent = `Updated: ${new Date().toLocaleTimeString()}`;
-    if (refresh || force) showUploadToast("Upload sarees synced.");
-  } catch (error) {
-    root.innerHTML = `<div class="upload-empty">Upload API failed: ${uploadEscapeHtml(error.message)}</div>`;
+  if (!silent && !uploadSareeState.rows.length) {
+    root.innerHTML = `<div class="upload-empty">Loading uploaded sarees...</div>`;
   }
+
+  try {
+    uploadSareeState.loadingRecent = true;
+    const response = await fetch(`${UPLOAD_API.recent}${force ? "?refresh=1" : ""}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 && data.error === "Review password required.") {
+      await uploadAuthenticate();
+      return loadRecentUploadSarees({ force, preserveDetail, silent });
+    }
+    if (!response.ok) throw new Error(data.error || data.message || "Unable to load uploaded sarees.");
+
+    uploadSareeState.rows = Array.isArray(data.rows)
+      ? data.rows
+      : Array.isArray(data.uploads)
+        ? data.uploads
+        : [];
+    renderUploadRows();
+    updateUploadSyncTime();
+
+    if (preserveDetail && uploadSareeState.detailOpen && uploadSareeState.currentRowId) {
+      const updatedRow = uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
+      if (updatedRow) {
+        uploadSareeState.selectedRowId = updatedRow.rowId;
+        renderUploadDetail(updatedRow, { keepOpen: true });
+      }
+    }
+
+    if (!silent) showUploadToast("Upload saree data synced.");
+  } catch (error) {
+    console.error("Upload recent sync failed:", error);
+    root.innerHTML = `<div class="upload-empty">Upload API failed: ${uploadEscapeHtml(error.message)}</div>`;
+  } finally {
+    uploadSareeState.loadingRecent = false;
+  }
+}
+
+function updateUploadSyncTime() {
+  document.getElementById("uploadUpdatedAt").textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+}
+
+async function syncUploadSareesNow() {
+  await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: false });
 }
 
 function renderUploadRows() {
@@ -214,8 +265,7 @@ function renderUploadRows() {
   }).join("");
 }
 
-function renderUploadDetail() {
-  const row = currentUploadRow();
+function renderUploadDetail(row = currentUploadRow(), options = {}) {
   if (!row) return;
 
   const status = uploadStatusText(row);
@@ -253,13 +303,19 @@ function renderUploadDetail() {
 }
 
 function openUploadDetail(rowId) {
+  const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(rowId));
+  if (!row) return;
+  uploadSareeState.detailOpen = true;
+  uploadSareeState.currentRowId = rowId;
   uploadSareeState.selectedRowId = rowId;
   uploadSareeState.selectedGeneratedKey = "front";
-  renderUploadDetail();
+  renderUploadDetail(row, { keepOpen: false });
   document.getElementById("uploadDetailBackdrop").classList.add("open");
 }
 
 function closeUploadDetail() {
+  uploadSareeState.detailOpen = false;
+  uploadSareeState.currentRowId = null;
   document.getElementById("uploadDetailBackdrop").classList.remove("open");
 }
 
@@ -279,6 +335,7 @@ async function submitUploadSaree(event) {
 
   const submitBtn = document.getElementById("uploadSubmitBtn");
   submitBtn.disabled = true;
+  uploadSareeState.submitting = true;
   setUploadMessage("Uploading...");
 
   try {
@@ -290,11 +347,13 @@ async function submitUploadSaree(event) {
     clearUploadFilePreviews();
     setUploadMessage("Uploaded successfully. Generation Status set to Start.");
     showUploadToast("Uploaded successfully. Generation Status set to Start.");
-    await loadUploadSarees({ force: true });
+    await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+    updateUploadSyncTime();
   } catch (error) {
     setUploadMessage(error.message, true);
     showUploadToast(error.message, true);
   } finally {
+    uploadSareeState.submitting = false;
     submitBtn.disabled = false;
   }
 }
@@ -309,7 +368,7 @@ async function updateUploadStatus(action) {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ feedback }),
     });
-    await loadUploadSarees({ force: true });
+    await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
     const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
     if (updatedRow) {
       uploadSareeState.selectedRowId = updatedRow.rowId;
@@ -344,16 +403,27 @@ function setUploadSareeActive(active) {
   if (active) {
     if (!uploadSareeState.loaded) {
       uploadSareeState.loaded = true;
-      loadUploadStatus().finally(() => loadUploadSarees());
+      loadUploadStatus().finally(() => loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true }));
     } else {
-      loadUploadSarees();
+      loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
     }
-    if (!uploadSareeState.syncTimer) {
-      uploadSareeState.syncTimer = setInterval(() => {
-        if (uploadSareeState.active) loadUploadSarees();
-      }, 15000);
-    }
-  } else if (uploadSareeState.syncTimer) {
+    startUploadAutoSync();
+  } else {
+    stopUploadAutoSync();
+  }
+}
+
+function startUploadAutoSync() {
+  stopUploadAutoSync();
+  uploadSareeState.syncTimer = setInterval(() => {
+    if (!uploadSareeState.active) return;
+    if (uploadSareeState.submitting) return;
+    loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+  }, 15000);
+}
+
+function stopUploadAutoSync() {
+  if (uploadSareeState.syncTimer) {
     clearInterval(uploadSareeState.syncTimer);
     uploadSareeState.syncTimer = null;
   }
