@@ -1,4 +1,5 @@
 .env
+.env.upload
 .mcp.json
 mcp_config.local.json
 node_modules

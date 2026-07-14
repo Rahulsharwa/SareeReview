@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import multer from "multer";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
@@ -8,6 +9,7 @@ import { Redis } from "@upstash/redis";
 import { createClient } from "redis";
 
 dotenv.config();
+dotenv.config({ path: ".env.upload" });
 
 const app = express();
 const PORT = process.env.PORT || 3003;
@@ -39,6 +41,33 @@ const SOCIAL_CACHE_TTL_SECONDS = Number(process.env.SOCIAL_CACHE_TTL_SECONDS || 
 const SOCIAL_REVIEW_NOTE_FIELD = process.env.SOCIAL_REVIEW_NOTE_FIELD || "Review Note";
 const APP_REVIEW_PASSWORD = process.env.APP_REVIEW_PASSWORD || "";
 const SOCIAL_AUTH_COOKIE = "jsh_social_review";
+const UPLOAD_BASEROW_API_URL = process.env.UPLOAD_BASEROW_API_URL || BASEROW_BASE_URL;
+const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
+const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
+const UPLOAD_MAX_FILE_SIZE_MB = Number(process.env.UPLOAD_MAX_FILE_SIZE_MB || 10);
+const UPLOAD_MAX_FILE_SIZE_BYTES = UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024;
+const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:v1`;
+const UPLOAD_RECENT_CACHE_TTL_SECONDS = 60;
+const UPLOAD_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const UPLOAD_FIELDS = {
+  productTitle: process.env.UPLOAD_FIELD_PRODUCT_TITLE || "9535465",
+  productCode: process.env.UPLOAD_FIELD_PRODUCT_CODE || "9535466",
+  category: process.env.UPLOAD_FIELD_CATEGORY || "9535467",
+  price: process.env.UPLOAD_FIELD_PRICE || "9535468",
+  sareeImage: process.env.UPLOAD_FIELD_SAREE_IMAGE || "9535469",
+  blouseImage: process.env.UPLOAD_FIELD_BLOUSE_IMAGE || "9535470",
+  generationStatus: process.env.UPLOAD_FIELD_GENERATION_STATUS || "9535471",
+  commentNotes: process.env.UPLOAD_FIELD_COMMENT_NOTES || "9535472",
+  frontView: process.env.UPLOAD_FIELD_FRONT_VIEW || "9535578",
+  backView: process.env.UPLOAD_FIELD_BACK_VIEW || "9535579",
+  sideView: process.env.UPLOAD_FIELD_SIDE_VIEW || "9535580",
+  closeUp: process.env.UPLOAD_FIELD_CLOSE_UP || "9535581",
+};
+const UPLOAD_GENERATION_STATUS = {
+  start: process.env.UPLOAD_GENERATION_STATUS_START || "Start",
+  approved: process.env.UPLOAD_GENERATION_STATUS_APPROVED || "Approved",
+  failed: process.env.UPLOAD_GENERATION_STATUS_FAILED || "Failed",
+};
 
 const SOCIAL_TABLES = {
   Dashboard: 924895,
@@ -526,6 +555,17 @@ SAREE_TABLES.forEach((table) => {
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+const uploadSareeMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_MAX_FILE_SIZE_BYTES, files: 2 },
+  fileFilter: (req, file, cb) => {
+    if (!UPLOAD_IMAGE_MIME_TYPES.has(file.mimetype)) {
+      return cb(new Error("Only JPG, PNG, and WEBP image uploads are allowed."));
+    }
+    return cb(null, true);
+  },
+});
 
 const fieldMapCache = new Map();
 const memoryCache = new Map();
@@ -1673,6 +1713,173 @@ async function clearSocialCache() {
   await cacheDelete(SOCIAL_CACHE_KEY);
 }
 
+function uploadFieldKey(name) {
+  return `field_${UPLOAD_FIELDS[name]}`;
+}
+
+function uploadStatusPayload(status, feedback = "") {
+  const payload = {
+    [uploadFieldKey("generationStatus")]: status,
+  };
+  if (feedback) payload[uploadFieldKey("commentNotes")] = feedback;
+  return payload;
+}
+
+function getUploadConfigStatus() {
+  const required = ["UPLOAD_BASEROW_TOKEN", "UPLOAD_BASEROW_TABLE_ID"];
+  const missing = required.filter((key) => !process.env[key] && !(key === "UPLOAD_BASEROW_TABLE_ID" && UPLOAD_BASEROW_TABLE_ID));
+  const fieldValues = Object.values(UPLOAD_FIELDS);
+  const fieldsConfigured = fieldValues.every((value) => /^\d+$/.test(String(value || "")));
+  return {
+    ok: missing.length === 0 && fieldsConfigured,
+    configured: missing.length === 0,
+    tableId: Number(UPLOAD_BASEROW_TABLE_ID),
+    fieldsConfigured,
+    missing,
+    maxFileSizeMb: UPLOAD_MAX_FILE_SIZE_MB,
+  };
+}
+
+function assertUploadConfig() {
+  if (!UPLOAD_BASEROW_TOKEN) {
+    const error = new Error("Upload Baserow token is not configured.");
+    error.status = 500;
+    throw error;
+  }
+}
+
+async function uploadBaserowFetch(pathname, options = {}) {
+  assertUploadConfig();
+  const response = await fetch(`${UPLOAD_BASEROW_API_URL}${pathname}`, {
+    ...options,
+    headers: {
+      Authorization: `Token ${UPLOAD_BASEROW_TOKEN}`,
+      Accept: "application/json",
+      ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+  if (!response.ok) {
+    const error = new Error(data?.detail || data?.error || `Upload Baserow API failed with ${response.status}`);
+    error.status = response.status;
+    error.baserow = data;
+    throw error;
+  }
+  return data;
+}
+
+async function uploadBaserowFile(file) {
+  const form = new FormData();
+  const blob = new Blob([file.buffer], { type: file.mimetype });
+  form.append("file", blob, file.originalname || "upload-image");
+  return uploadBaserowFetch("/api/user-files/upload-file/", {
+    method: "POST",
+    body: form,
+  });
+}
+
+function firstUploadFileUrl(value) {
+  return getFileUrls(value)[0] || "";
+}
+
+function readUploadField(row, name) {
+  const rawKey = uploadFieldKey(name);
+  if (Object.prototype.hasOwnProperty.call(row, rawKey)) return row[rawKey];
+  const displayNames = {
+    productTitle: "Product Title",
+    productCode: "Product Code",
+    category: "Category",
+    price: "Price",
+    sareeImage: "Saree Image",
+    blouseImage: "Blouse Image",
+    generationStatus: "Generation Status",
+    commentNotes: "Comment / Notes",
+    frontView: "Front View",
+    backView: "Back View",
+    sideView: "Side View",
+    closeUp: "Close-Up",
+  };
+  return row[displayNames[name]];
+}
+
+function normalizeUploadRow(row = {}) {
+  const productTitle = normalizeSocialText(readUploadField(row, "productTitle"));
+  const productCode = normalizeSocialText(readUploadField(row, "productCode"));
+  const category = normalizeSocialText(readUploadField(row, "category"));
+  const price = normalizeSocialText(readUploadField(row, "price"));
+  const generationStatus = normalizeSocialText(readUploadField(row, "generationStatus"));
+  const commentNotes = normalizeSocialText(readUploadField(row, "commentNotes"));
+  return {
+    rowId: row.id,
+    productTitle: productTitle || "Untitled Upload",
+    productCode: productCode || "No product code",
+    category: category || "No category",
+    price: price || "Price not added",
+    generationStatus,
+    commentNotes,
+    images: {
+      saree: firstUploadFileUrl(readUploadField(row, "sareeImage")),
+      blouse: firstUploadFileUrl(readUploadField(row, "blouseImage")),
+      front: firstUploadFileUrl(readUploadField(row, "frontView")),
+      side: firstUploadFileUrl(readUploadField(row, "sideView")),
+      back: firstUploadFileUrl(readUploadField(row, "backView")),
+      closeUp: firstUploadFileUrl(readUploadField(row, "closeUp")),
+    },
+  };
+}
+
+function appendOptionalUploadField(payload, name, value) {
+  const trimmed = String(value || "").trim();
+  if (trimmed) payload[uploadFieldKey(name)] = trimmed;
+}
+
+async function fetchRecentUploadSarees({ refresh = false } = {}) {
+  if (!refresh) {
+    const cached = await cacheGet(UPLOAD_RECENT_CACHE_KEY);
+    if (cached) return { ...cached, cache: { ...cached.cache, status: "hit" } };
+  }
+
+  const params = new URLSearchParams({
+    user_field_names: "true",
+    size: "50",
+    order_by: "-id",
+  });
+  const data = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`);
+  const rows = Array.isArray(data.results) ? data.results.map(normalizeUploadRow) : [];
+  const payload = {
+    ok: true,
+    rows,
+    cache: { provider: cacheProvider(), ttlSeconds: UPLOAD_RECENT_CACHE_TTL_SECONDS, status: "miss" },
+  };
+  await cacheSet(UPLOAD_RECENT_CACHE_KEY, payload, UPLOAD_RECENT_CACHE_TTL_SECONDS);
+  return payload;
+}
+
+async function clearUploadCache() {
+  await cacheDelete(UPLOAD_RECENT_CACHE_KEY);
+}
+
+async function patchUploadSareeStatus(rowId, status, feedback = "") {
+  if (!/^\d+$/.test(String(rowId || ""))) {
+    const error = new Error("Invalid upload rowId.");
+    error.status = 400;
+    throw error;
+  }
+  const updated = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/${rowId}/?user_field_names=false`, {
+    method: "PATCH",
+    body: JSON.stringify(uploadStatusPayload(status, feedback)),
+  });
+  await clearUploadCache();
+  return normalizeUploadRow(updated);
+}
+
 function buildApprovePayload(tableConfig) {
   return {
     [tableConfig.fields.shopify]: SHOPIFY_NOTES_APPROVED_VALUE,
@@ -2356,6 +2563,101 @@ app.post("/api/reject-content", requireSocialReviewAuth, async (req, res) => {
   } catch (error) {
     console.error("Social reject failed:", safeBaserowError(error));
     res.status(error.status || 500).json({ ok: false, error: "Unable to reject content." });
+  }
+});
+
+app.get("/api/upload-saree/status", requireSocialReviewAuth, (req, res) => {
+  const status = getUploadConfigStatus();
+  res.json(status);
+});
+
+app.get("/api/upload-saree/recent", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const refresh = String(req.query.refresh || "") === "1";
+    res.json(await fetchRecentUploadSarees({ refresh }));
+  } catch (error) {
+    res.status(error.status || 500).json({
+      ok: false,
+      error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to load uploaded sarees.",
+    });
+  }
+});
+
+app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
+  uploadSareeMulter.fields([
+    { name: "sareeImage", maxCount: 1 },
+    { name: "blouseImage", maxCount: 1 },
+  ])(req, res, async (uploadError) => {
+    try {
+      if (uploadError) {
+        const message = uploadError.code === "LIMIT_FILE_SIZE"
+          ? `Each image must be ${UPLOAD_MAX_FILE_SIZE_MB}MB or smaller.`
+          : uploadError.message;
+        return res.status(400).json({ ok: false, error: message });
+      }
+
+      const sareeImage = req.files?.sareeImage?.[0] || null;
+      const blouseImage = req.files?.blouseImage?.[0] || null;
+      if (!sareeImage) {
+        return res.status(400).json({ ok: false, error: "Please upload Saree Image." });
+      }
+
+      const sareeUploadedFile = await uploadBaserowFile(sareeImage);
+      const blouseUploadedFile = blouseImage ? await uploadBaserowFile(blouseImage) : null;
+
+      const payload = {
+        [uploadFieldKey("sareeImage")]: [sareeUploadedFile],
+        [uploadFieldKey("generationStatus")]: UPLOAD_GENERATION_STATUS.start,
+      };
+
+      if (blouseUploadedFile) payload[uploadFieldKey("blouseImage")] = [blouseUploadedFile];
+      appendOptionalUploadField(payload, "productTitle", req.body?.productTitle);
+      appendOptionalUploadField(payload, "productCode", req.body?.productCode);
+      appendOptionalUploadField(payload, "category", req.body?.category);
+      appendOptionalUploadField(payload, "price", req.body?.price);
+      appendOptionalUploadField(payload, "commentNotes", req.body?.commentNotes);
+
+      const created = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?user_field_names=false`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      await clearUploadCache();
+      res.json({ ok: true, row: normalizeUploadRow(created) });
+    } catch (error) {
+      res.status(error.status || 500).json({
+        ok: false,
+        error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to upload saree assets.",
+      });
+    }
+  });
+});
+
+app.patch("/api/upload-saree/:rowId/approve", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.approved);
+    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.approved, row });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to approve uploaded saree." });
+  }
+});
+
+app.patch("/api/upload-saree/:rowId/reject", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const feedback = String(req.body?.feedback || req.body?.comment || "").trim();
+    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
+    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to reject uploaded saree." });
+  }
+});
+
+app.patch("/api/upload-saree/:rowId/request-changes", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const feedback = String(req.body?.feedback || req.body?.comment || "").trim();
+    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
+    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to request changes for uploaded saree." });
   }
 });
 

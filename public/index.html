@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Janardhana Silk House — Saree Review Portal</title>
   <link rel="stylesheet" href="/social-review.css" />
+  <link rel="stylesheet" href="/upload-saree.css" />
   <!-- Live Baserow version: frontend calls backend /api/products. Token stays in backend .env only. -->
   <style>
     :root {
@@ -1202,6 +1203,7 @@
     <div class="review-mode-switch">
       <button id="sareeReviewTab" class="mode-tab active" type="button">Saree Review</button>
       <button id="socialReviewTab" class="mode-tab" type="button">Social Media Review</button>
+      <button id="uploadSareeTab" class="mode-tab" type="button">Upload Saree Assets</button>
     </div>
 
     <section id="sareeReviewApp">
@@ -1343,6 +1345,84 @@
 
       <main id="socialDateGroups"><div class="social-loader">Click Sync to load social review data.</div></main>
     </section>
+
+    <section id="uploadSareeApp" class="upload-app" hidden>
+      <header class="upload-topbar">
+        <div>
+          <h1 class="upload-title">Upload Saree Assets</h1>
+          <p class="upload-subtitle">Create upload rows for saree generation and review generated outputs when Baserow updates them.</p>
+        </div>
+        <div class="upload-top-actions">
+          <div class="upload-sync-copy">Live Sync · Auto 15s<br><span id="uploadUpdatedAt">Updated: --:--:--</span></div>
+          <button class="upload-btn" type="button" onclick="loadUploadSarees({ refresh: true })">Sync Now</button>
+        </div>
+      </header>
+
+      <section class="upload-status" id="uploadStatusPanel">Checking upload backend...</section>
+
+      <section class="upload-layout">
+        <form id="uploadSareeForm" class="upload-form">
+          <div class="upload-form-head">
+            <h2>Upload Assets</h2>
+            <span id="uploadMaxSizeText">JPG, PNG, WEBP</span>
+          </div>
+          <div class="upload-field-grid">
+            <label>Product Title<input name="productTitle" autocomplete="off" /></label>
+            <label>Product Code<input name="productCode" autocomplete="off" /></label>
+            <label>Price<input name="price" inputmode="decimal" autocomplete="off" /></label>
+            <label>Category<input name="category" autocomplete="off" /></label>
+          </div>
+          <label>Comment / Notes<textarea name="commentNotes" rows="4"></textarea></label>
+          <div class="upload-file-grid">
+            <label class="upload-file">Saree Image <strong>Required</strong><input name="sareeImage" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+            <label class="upload-file">Blouse Image <span>Optional</span><input name="blouseImage" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+          </div>
+          <div class="upload-form-actions">
+            <button class="upload-btn primary" id="uploadSubmitBtn" type="submit">Upload Assets</button>
+            <span id="uploadFormMessage"></span>
+          </div>
+        </form>
+
+        <section class="upload-recent">
+          <div class="upload-section-head">
+            <h2>Recent Uploaded Sarees</h2>
+            <span id="uploadRecentCount">0 rows</span>
+          </div>
+          <div id="uploadRecentRows" class="upload-card-grid">
+            <div class="upload-empty">No uploaded rows loaded yet.</div>
+          </div>
+        </section>
+      </section>
+    </section>
+  </div>
+
+  <div id="uploadDetailBackdrop" class="upload-detail-backdrop">
+    <aside class="upload-detail">
+      <header class="upload-detail-head">
+        <div>
+          <h2 id="uploadDetailTitle">Upload Detail</h2>
+          <p id="uploadDetailMeta">Review generated images</p>
+        </div>
+        <button class="upload-icon-btn" type="button" onclick="closeUploadDetail()">x</button>
+      </header>
+      <main class="upload-detail-body">
+        <section>
+          <h3>Reference Images</h3>
+          <div id="uploadReferenceImages" class="upload-media-grid"></div>
+        </section>
+        <section>
+          <h3>Generated Images</h3>
+          <div id="uploadGeneratedTabs" class="upload-generated-tabs"></div>
+          <div id="uploadGeneratedPreview" class="upload-generated-preview"></div>
+        </section>
+      </main>
+      <footer class="upload-detail-actions">
+        <textarea id="uploadFeedbackInput" placeholder="Feedback for reject or request changes..."></textarea>
+        <button class="upload-btn danger" type="button" onclick="rejectUploadSaree()">Reject</button>
+        <button class="upload-btn warning" type="button" onclick="requestUploadChanges()">Request Changes</button>
+        <button class="upload-btn primary" id="uploadApproveBtn" type="button" onclick="approveUploadSaree()">Approve</button>
+      </footer>
+    </aside>
   </div>
 
   <div id="socialEditorBackdrop" class="social-editor-backdrop">
@@ -2433,6 +2513,7 @@
     fetchCollections().finally(() => fetchProductsFromAPI());
   </script>
   <script src="/social-review.js"></script>
+  <script src="/upload-saree.js"></script>
   <script>
     const reviewModeState = { activeMode: "saree" };
 
@@ -2440,8 +2521,11 @@
       reviewModeState.activeMode = mode;
       document.getElementById("sareeReviewApp").hidden = mode !== "saree";
       document.getElementById("socialReviewApp").hidden = mode !== "social";
+      document.getElementById("uploadSareeApp").hidden = mode !== "upload";
       document.getElementById("sareeReviewTab").classList.toggle("active", mode === "saree");
       document.getElementById("socialReviewTab").classList.toggle("active", mode === "social");
+      document.getElementById("uploadSareeTab").classList.toggle("active", mode === "upload");
+      if (typeof setUploadSareeActive === "function") setUploadSareeActive(mode === "upload");
 
       if (mode === "social" && !window.__socialReviewLoaded) {
         loadSocialReviewData({ refresh: false });
@@ -2451,6 +2535,7 @@
 
     document.getElementById("sareeReviewTab").addEventListener("click", () => setReviewMode("saree"));
     document.getElementById("socialReviewTab").addEventListener("click", () => setReviewMode("social"));
+    document.getElementById("uploadSareeTab").addEventListener("click", () => setReviewMode("upload"));
   </script>
 </body>
 </html>
