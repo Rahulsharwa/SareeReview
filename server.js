@@ -1849,10 +1849,11 @@ async function fetchRecentUploadSarees({ refresh = false } = {}) {
   const params = new URLSearchParams({
     user_field_names: "true",
     size: "50",
-    order_by: "-id",
   });
   const data = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`);
-  const rows = Array.isArray(data.results) ? data.results.map(normalizeUploadRow) : [];
+  const rows = Array.isArray(data.results)
+    ? data.results.sort((a, b) => Number(b.id || 0) - Number(a.id || 0)).map(normalizeUploadRow)
+    : [];
   const payload = {
     ok: true,
     rows,
