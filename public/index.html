@@ -1195,7 +1195,7 @@
         <button class="main-menu-btn" id="backMainBtn" type="button">← Back to Main Menu</button>
         <div class="live-copy">◷ Live Sync · Auto 15s<br><span id="updatedAt">Updated: --:--:--</span></div>
         <span class="status-pill"><span class="dot"></span>Baserow Connected</span>
-        <button class="icon-btn" id="refreshBtn" title="Refresh data">↻</button>
+        <button class="icon-btn" id="refreshBtn" type="button" title="Refresh data">↻</button>
         <div class="avatar">AM</div>
       </div>
     </header>
@@ -1221,8 +1221,8 @@
       <div class="field"><span class="field-label">Status:</span><select id="statusSelect"><option>All Statuses</option><option>Approved</option><option>Pending Review</option><option>Rejected</option></select></div>
       <div class="field"><span class="field-label">Sort:</span><select id="sortSelect"><option>Latest Updated</option><option>Price High to Low</option><option>Price Low to High</option><option>Title A-Z</option></select></div>
       <div class="view-toggle">
-        <button class="toggle-btn active" id="gridBtn" title="Grid view">▦</button>
-        <button class="toggle-btn" id="detailBtn" title="Detail view">☰</button>
+        <button class="toggle-btn active" id="gridBtn" type="button" title="Grid view">▦</button>
+        <button class="toggle-btn" id="detailBtn" type="button" title="Detail view">☰</button>
       </div>
     </section>
 
@@ -1269,18 +1269,18 @@
             </div>
           </div>
           <div class="card-actions" style="margin-top:18px; grid-template-columns: 1fr 1fr 1fr; max-width:650px; margin-left:auto; margin-right:auto;">
-            <button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button>
-            <button class="btn btn-green" onclick="approveProduct()">Approve</button>
-            <button class="btn btn-neutral" onclick="jumpToNextProduct()">Skip / Next</button>
+            <button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button>
+            <button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button>
+            <button class="btn btn-neutral" type="button" onclick="jumpToNextProduct()">Skip / Next</button>
           </div>
         </section>
 
         <div class="action-bar">
           <input id="approvalNote" class="note-input" placeholder="Add approval note..." />
-          <button class="btn btn-red" onclick="rejectProduct()">Reject</button>
-          <button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button>
-          <button class="btn btn-neutral" onclick="jumpToNextProduct()">Skip / Next</button>
-          <button class="btn btn-green" onclick="approveProduct()">Approve</button>
+          <button class="btn btn-red" type="button" onclick="rejectProduct()">Reject</button>
+          <button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button>
+          <button class="btn btn-neutral" type="button" onclick="jumpToNextProduct()">Skip / Next</button>
+          <button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button>
         </div>
       </section>
 
@@ -1569,7 +1569,7 @@
     <div class="modal">
       <div class="modal-head">
         <h3>Request Changes</h3>
-        <button class="icon-btn" onclick="closeRequestModal()">×</button>
+        <button class="icon-btn" type="button" onclick="closeRequestModal()">×</button>
       </div>
       <div class="modal-grid">
         <div>
@@ -1592,7 +1592,7 @@
           <label for="changeComment">Comments *</label>
           <textarea id="changeComment" maxlength="1000" placeholder="Please provide details about the changes required..."></textarea>
           <div class="char-count"><span id="charCount">0</span>/1000 characters</div>
-          <button class="btn btn-maroon" style="margin-top:18px; width:150px; float:right;" onclick="submitChanges()">Submit</button>
+          <button class="btn btn-maroon" type="button" style="margin-top:18px; width:150px; float:right;" onclick="submitChanges()">Submit</button>
         </div>
       </div>
     </div>
@@ -1603,10 +1603,10 @@
       <div class="lightbox-head">
         <strong id="lightboxTitle">Image preview</strong>
         <div class="lightbox-tools">
-          <button onclick="setLightboxZoom(ZOOM_STEP)">Zoom +</button>
-          <button onclick="setLightboxZoom(-ZOOM_STEP)">Zoom -</button>
-          <button onclick="resetLightbox()">Reset</button>
-          <button onclick="closeLightbox()">Close</button>
+          <button type="button" onclick="setLightboxZoom(ZOOM_STEP)">Zoom +</button>
+          <button type="button" onclick="setLightboxZoom(-ZOOM_STEP)">Zoom -</button>
+          <button type="button" onclick="resetLightbox()">Reset</button>
+          <button type="button" onclick="closeLightbox()">Close</button>
         </div>
       </div>
       <div class="lightbox-stage" id="lightboxStage">
@@ -1698,16 +1698,85 @@
     let collectionCounts = new Map();
     let isFetchingProducts = false;
     let pendingFetchOptions = null;
+    let sareeAutoSyncTimer = null;
 
-    async function fetchCollections() {
+    function getActiveReviewMode() {
+      return window.reviewModeState?.activeMode || 'saree';
+    }
+
+    function isMobileSareeView() {
+      return window.matchMedia('(max-width: 760px)').matches;
+    }
+
+    function createSareeProductsSignature(items) {
+      return JSON.stringify((items || []).map(product => ({
+        id: product.id || `${product.tableId}:${product.rowId}`,
+        tableId: product.tableId,
+        rowId: product.rowId,
+        collectionName: product.collectionName || '',
+        category: product.category || '',
+        generationStatus: product.generationStatus || '',
+        shopify: product.shopify || '',
+        title: product.title || '',
+        code: product.code || '',
+        price: product.price || '',
+        modified: product.modified || '',
+        front: product.images?.front || '',
+        side: product.images?.side || '',
+        back: product.images?.back || '',
+        close: product.images?.close || '',
+        grid: product.images?.grid || '',
+        video: product.images?.video || '',
+        full: product.images?.full || '',
+        blouse: product.images?.blouse || '',
+        pallu: product.images?.pallu || '',
+        border: product.images?.border || ''
+      })));
+    }
+
+    function createSareeCollectionsSignatureFromData(data) {
+      return JSON.stringify((data?.collections || []).map(collection => ({
+        name: collection.name || collection.displayName || '',
+        tableId: collection.tableId,
+        count: collection.count,
+        group: collection.group || ''
+      })));
+    }
+
+    function createSareeDetailSignature(product) {
+      if (!product) return '';
+      return JSON.stringify({
+        id: product.id,
+        tableId: product.tableId,
+        rowId: product.rowId,
+        generationStatus: product.generationStatus || '',
+        shopify: product.shopify || '',
+        comment: product.comment || '',
+        front: product.images?.front || '',
+        side: product.images?.side || '',
+        back: product.images?.back || '',
+        close: product.images?.close || '',
+        grid: product.images?.grid || '',
+        video: product.images?.video || '',
+        full: product.images?.full || '',
+        blouse: product.images?.blouse || '',
+        pallu: product.images?.pallu || '',
+        border: product.images?.border || ''
+      });
+    }
+
+    async function fetchCollections(options = {}) {
+      const { render = true, force = false } = options;
       try {
-        const response = await fetch('/api/collections', {
+        const response = await fetch(`/api/collections${force ? '?refresh=1' : ''}`, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
           cache: 'no-store'
         });
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || 'Unable to fetch collections');
+        const collectionsSignature = createSareeCollectionsSignatureFromData(data);
+        const collectionsChanged = state.lastCollectionsSignature !== collectionsSignature;
         collectionCounts = new Map((data.collections || []).map(item => [String(item.tableId), item.count || 0]));
         collectionCounts.set('all', data.total || 0);
         (data.collections || []).forEach(item => {
@@ -1721,7 +1790,12 @@
           tableByName.set(table.name, table);
           tableByName.set(item.name, table);
         });
-        renderCategories();
+        if (render && collectionsChanged) {
+          state.lastCollectionsSignature = collectionsSignature;
+          renderCategories();
+        } else if (!state.lastCollectionsSignature) {
+          state.lastCollectionsSignature = collectionsSignature;
+        }
         return data;
       } catch (error) {
         console.error('Collection count fetch failed:', error);
@@ -1730,14 +1804,25 @@
     }
 
     async function fetchProductsFromAPI(options = {}) {
+      const {
+        force = false,
+        preserveDetail = true,
+        preserveScroll = true,
+        silent = false,
+        showToast: shouldShowToast = false,
+        initial = false
+      } = options;
       if (isFetchingProducts) {
         pendingFetchOptions = { ...pendingFetchOptions, ...options };
         return;
       }
       isFetchingProducts = true;
+      state.isSyncing = true;
+      const previousScrollY = window.scrollY;
 
       try {
         const params = new URLSearchParams();
+        if (force) params.set('refresh', '1');
 
         if (state?.selectedTableId && state.selectedTableId !== 'all') {
           params.set('tableId', state.selectedTableId);
@@ -1746,12 +1831,15 @@
         }
 
         const q = document.getElementById('searchInput')?.value?.trim();
+        state.searchQuery = q || '';
         if (q) params.set('search', q);
 
         const status = document.getElementById('statusSelect')?.value;
+        state.statusFilter = status || 'All Statuses';
         if (status && status !== 'All Statuses') params.set('status', status);
 
         const sort = document.getElementById('sortSelect')?.value;
+        state.sortMode = sort || 'Latest Updated';
         if (sort) params.set('sort', sort);
 
         const response = await fetch(`/api/products?${params.toString()}`, {
@@ -1772,30 +1860,71 @@
           throw new Error(data.error || 'Unable to fetch Baserow products');
         }
 
-        products = Array.isArray(data.products) ? data.products : [];
+        const previousSelectedProductId = state.selectedProductId;
+        const nextProducts = Array.isArray(data.products) ? data.products : [];
+        const nextSignature = createSareeProductsSignature(nextProducts);
+        const productsChanged = state.lastProductsSignature !== nextSignature;
+        products = nextProducts;
+        state.products = products;
+        state.lastProductsSignature = nextSignature;
 
         const visibleProducts = filteredProducts();
         if (visibleProducts.length && !visibleProducts.find(p => p.id === state.selectedProductId)) {
-          state.selectedProductId = visibleProducts[0].id;
+          if (state.view === 'detail' && preserveDetail && previousSelectedProductId) {
+            state.view = 'grid';
+            state.selectedProductId = visibleProducts[0].id;
+            state.currentDetailSignature = '';
+          } else {
+            state.selectedProductId = visibleProducts[0].id;
+          }
         } else if (!visibleProducts.length) {
           state.selectedProductId = null;
+          if (state.view === 'detail') {
+            state.view = 'grid';
+            state.currentDetailSignature = '';
+          }
         }
 
-        renderAll(false);
+        if (initial || productsChanged) {
+          if (state.view === 'detail' && preserveDetail && state.selectedProductId) {
+            const updatedProduct = currentProduct();
+            const nextDetailSignature = createSareeDetailSignature(updatedProduct);
+            if (nextDetailSignature !== state.currentDetailSignature) {
+              state.currentDetailSignature = nextDetailSignature;
+              renderAll(false);
+            } else {
+              renderGrid();
+              updateSareeSyncTime();
+            }
+          } else {
+            renderAll(false);
+          }
+        } else {
+          updateSareeSyncTime();
+        }
 
-        if (options.showToast) {
+        if (shouldShowToast && !silent) {
           showToast(`Live Baserow data refreshed. ${products.length} products loaded.`);
+        }
+        if (preserveScroll) {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' });
+          });
         }
       } catch (error) {
         console.error('Baserow live fetch failed:', error);
-        products = [];
-        renderErrorPanel({
-          error: error.message || 'Unable to connect with Baserow.',
-          fix: ['Check the backend .env REST token', 'Restart the backend server', 'Open /api/baserow/diagnose for details'],
-          diagnoseUrl: '/api/baserow/diagnose'
-        });
+        if (!products.length) {
+          renderErrorPanel({
+            error: error.message || 'Unable to connect with Baserow.',
+            fix: ['Check the backend .env REST token', 'Restart the backend server', 'Open /api/baserow/diagnose for details'],
+            diagnoseUrl: '/api/baserow/diagnose'
+          });
+        } else if (!silent) {
+          showToast(error.message || 'Unable to sync Saree Review.');
+        }
       } finally {
         isFetchingProducts = false;
+        state.isSyncing = false;
         if (pendingFetchOptions) {
           const nextOptions = pendingFetchOptions;
           pendingFetchOptions = null;
@@ -1805,6 +1934,13 @@
     }
 
     async function refreshCacheAndProducts() {
+      await syncSareeReviewNow();
+    }
+
+    async function syncSareeReviewNow(event) {
+      event?.preventDefault();
+      event?.stopPropagation();
+      const previousScrollY = window.scrollY;
       try {
         await fetch('/api/cache/refresh', {
           method: 'POST',
@@ -1815,7 +1951,34 @@
         console.warn('Cache refresh skipped:', error.message);
       }
 
-      fetchProductsFromAPI({ showToast: true });
+      await fetchCollections({ force: true, render: true });
+      await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: false, showToast: true });
+      requestAnimationFrame(() => window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' }));
+    }
+
+    function updateSareeSyncTime() {
+      document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    }
+
+    function startSareeAutoSync() {
+      stopSareeAutoSync();
+      sareeAutoSyncTimer = setInterval(() => {
+        if (getActiveReviewMode() !== 'saree') return;
+        if (state.isSyncing) return;
+        if (state.view === 'detail' && isMobileSareeView()) return;
+        fetchCollections({ render: true }).finally(() => {
+          fetchProductsFromAPI({ force: false, preserveDetail: true, preserveScroll: true, silent: true });
+        });
+      }, 15000);
+      state.autoSyncTimer = sareeAutoSyncTimer;
+    }
+
+    function stopSareeAutoSync() {
+      if (sareeAutoSyncTimer) {
+        clearInterval(sareeAutoSyncTimer);
+        sareeAutoSyncTimer = null;
+        state.autoSyncTimer = null;
+      }
     }
 
     function renderErrorPanel(errData) {
@@ -1836,7 +1999,7 @@
             <p style="color:#7a0f1d;font-weight:800;font-size:15px;margin:0 0 12px;">${errData.error || 'Unknown error'}</p>
             ${fixSteps ? `<p style="font-weight:900;color:#2b2118;margin:14px 0 6px;">How to fix:</p><ol style="margin:0;padding-left:18px;color:#4a3520;font-size:14px;line-height:1.7;">${fixSteps}</ol>` : ''}
             ${diagnoseLink}
-            <button onclick="fetchProductsFromAPI({ showToast: true })" style="margin-top:22px;padding:12px 28px;background:var(--maroon);color:#fff;border:none;border-radius:12px;font-weight:900;cursor:pointer;font-size:14px;">&#8635; Retry Connection</button>
+            <button type="button" onclick="fetchProductsFromAPI({ showToast: true })" style="margin-top:22px;padding:12px 28px;background:var(--maroon);color:#fff;border:none;border-radius:12px;font-weight:900;cursor:pointer;font-size:14px;">&#8635; Retry Connection</button>
           </div>
         </div>`;
       document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -1850,7 +2013,17 @@
       view: 'grid',
       selectedProductId: null,
       selectedGenerated: 'Front View',
-      selectedReference: 'Full Saree'
+      selectedReference: 'Full Saree',
+      products: [],
+      collections: [],
+      searchQuery: '',
+      statusFilter: 'All Statuses',
+      sortMode: 'Latest Updated',
+      isSyncing: false,
+      autoSyncTimer: null,
+      lastProductsSignature: '',
+      lastCollectionsSignature: '',
+      currentDetailSignature: ''
     };
 
     const GENERATED_MEDIA = [
@@ -1968,7 +2141,7 @@
       return `
         <img src="${src}" alt="${label}" class="${className}" loading="lazy" />
         <div class="zoom-actions">
-          <button class="zoom-btn" onclick="event.stopPropagation(); openLightbox('${safeSrc}', '${safeLabel}')" title="Open resize / zoom preview">⛶</button>
+          <button class="zoom-btn" type="button" onclick="event.stopPropagation(); openLightbox('${safeSrc}', '${safeLabel}')" title="Open resize / zoom preview">⛶</button>
         </div>
       `;
     }
@@ -2039,17 +2212,17 @@
       tabs.innerHTML = '';
       sel.innerHTML = '';
 
-      tabs.insertAdjacentHTML('beforeend', `<button class="tab ${state.selectedCategory === 'All Collections' ? 'active' : ''}" onclick="selectCategory('All Collections')">All Collections<span class="count">${getCategoryCount('All Collections')}</span></button>`);
+      tabs.insertAdjacentHTML('beforeend', `<button class="tab ${state.selectedCategory === 'All Collections' ? 'active' : ''}" type="button" onclick="selectCategory('All Collections')">All Collections<span class="count">${getCategoryCount('All Collections')}</span></button>`);
       sel.insertAdjacentHTML('beforeend', `<option value="All Collections" ${state.selectedCategory === 'All Collections' ? 'selected' : ''}>All Collections</option>`);
 
       CATEGORY_GROUPS.forEach(group => {
-        tabs.insertAdjacentHTML('beforeend', `<button class="tab category-group-tab ${state.selectedCategory === group.name ? 'active' : ''}" onclick="selectCategory('${escapeJs(group.name)}')">${group.name}<span class="count">${getCategoryCount(group.name)}</span></button>`);
+        tabs.insertAdjacentHTML('beforeend', `<button class="tab category-group-tab ${state.selectedCategory === group.name ? 'active' : ''}" type="button" onclick="selectCategory('${escapeJs(group.name)}')">${group.name}<span class="count">${getCategoryCount(group.name)}</span></button>`);
         sel.insertAdjacentHTML('beforeend', `<option value="${group.name}" ${state.selectedCategory === group.name ? 'selected' : ''}>${group.name}</option>`);
 
         group.children.forEach(childName => {
           const tabClass = group.name === 'Saree Collections' ? '' : 'category-child-tab';
           const optionLabel = group.name === 'Saree Collections' ? childName : `${group.name} - ${childName}`;
-          tabs.insertAdjacentHTML('beforeend', `<button class="tab ${tabClass} ${state.selectedCategory === childName ? 'active' : ''}" onclick="selectCategory('${escapeJs(childName)}')">${childName}<span class="count">${getCategoryCount(childName)}</span></button>`);
+          tabs.insertAdjacentHTML('beforeend', `<button class="tab ${tabClass} ${state.selectedCategory === childName ? 'active' : ''}" type="button" onclick="selectCategory('${escapeJs(childName)}')">${childName}<span class="count">${getCategoryCount(childName)}</span></button>`);
           sel.insertAdjacentHTML('beforeend', `<option value="${childName}" ${state.selectedCategory === childName ? 'selected' : ''}>${optionLabel}</option>`);
         });
       });
@@ -2089,8 +2262,8 @@
                 ${thumbnailItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(item.url || p.images?.[item.key], item.shortLabel || item.label, item.type)}</div>`).join('')}
               </div>
               <div class="card-actions">
-                <button class="btn btn-neutral" onclick="selectProduct('${p.id}', 'detail')">Review</button>
-                <button class="btn btn-green" onclick="approveProduct('${p.id}')">Approve</button>
+                <button class="btn btn-neutral" type="button" onclick="selectProduct('${p.id}', 'detail')">Review</button>
+                <button class="btn btn-green" type="button" onclick="approveProduct('${p.id}')">Approve</button>
               </div>
             </div>
           </article>
@@ -2146,14 +2319,14 @@
         state.selectedGenerated = selected.label;
       }
 
-      tabs.innerHTML = available.map(item => `<button class="mini-tab ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)">${item.label}</button>`).join('');
+      tabs.innerHTML = available.map(item => `<button class="mini-tab ${item.label === selected.label ? 'active' : ''}" type="button" onclick="state.selectedGenerated='${item.label}'; renderAll(false)">${item.label}</button>`).join('');
       const heroSrc = selected.url || p.images?.[selected.key];
       const heroLabel = selected.type === 'video' ? 'Generated Video Output' : `Generated ${selected.label}`;
       hero.innerHTML = `<div class="image-label">${heroLabel}</div>${makeMedia(heroSrc, heroLabel, selected.type)}`;
       strip.className = 'thumb-strip generated-thumb-strip';
       strip.innerHTML = available.map(item => {
         const src = item.url || p.images?.[item.key];
-        return `<button class="thumb generated-thumb ${item.label === selected.label ? 'active' : ''}" onclick="state.selectedGenerated='${item.label}'; renderAll(false)"><div class="thumb-img generated-thumb-media zoom-wrap">${makeMediaThumb(src, item.label, item.type)}</div><span class="generated-thumb-label">${item.label}</span></button>`;
+        return `<button class="thumb generated-thumb ${item.label === selected.label ? 'active' : ''}" type="button" onclick="state.selectedGenerated='${item.label}'; renderAll(false)"><div class="thumb-img generated-thumb-media zoom-wrap">${makeMediaThumb(src, item.label, item.type)}</div><span class="generated-thumb-label">${item.label}</span></button>`;
       }).join('');
     }
 
@@ -2205,16 +2378,16 @@
       const selectedMobileGenerated = generated[0];
       document.getElementById('mobilePreview').innerHTML = `
         <div class="phone">
-          <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
+          <div class="phone-top"><button class="icon-btn" type="button" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
           <div class="phone-tabs">${SAREE_TABLES.slice(1,5).map((table,i)=>`<span class="tab ${i===0?'active':''}">${table.name.split(' ')[0]}<span class="count">${collectionCounts.get(String(table.tableId)) || 0}</span></span>`).join('')}</div>
           <div class="phone-card"><strong>${p.code}</strong><br>${p.title}<br><span class="price">${formatPrice(p.price)}</span><br><span class="badge">${p.generationStatus}</span></div>
-          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;">${generated.map((item, index) => `<button class="mini-tab ${index === 0 ? 'active' : ''}">${item.label}</button>`).join('')}</div><div class="phone-hero zoom-wrap">${makeMedia(selectedMobileGenerated?.url, selectedMobileGenerated?.label || 'Mobile generated preview', selectedMobileGenerated?.type)}</div></div>
-          <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
+          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;">${generated.map((item, index) => `<button class="mini-tab ${index === 0 ? 'active' : ''}" type="button">${item.label}</button>`).join('')}</div><div class="phone-hero zoom-wrap">${makeMedia(selectedMobileGenerated?.url, selectedMobileGenerated?.label || 'Mobile generated preview', selectedMobileGenerated?.type)}</div></div>
+          <div class="phone-actions"><button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button></div>
         </div>
         <div class="phone">
-          <div class="phone-top"><button class="icon-btn" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
+          <div class="phone-top"><button class="icon-btn" type="button" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
           <div class="phone-card"><div class="phone-ref">${refs.length ? refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(ref.url || p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('') : '<div class="empty-img">No reference images available for this category.</div>'}</div></div>
-          <div class="phone-actions"><button class="btn btn-gold" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" onclick="approveProduct()">Approve</button></div>
+          <div class="phone-actions"><button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button></div>
         </div>
       `;
     }
@@ -2240,7 +2413,10 @@
         renderCompare(p);
         renderMobile(p);
       }
-      document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+      if (state.view === 'detail') {
+        state.currentDetailSignature = createSareeDetailSignature(p);
+      }
+      updateSareeSyncTime();
       document.getElementById('gridView').classList.toggle('active', state.view === 'grid');
       document.getElementById('detailView').classList.toggle('hidden', state.view !== 'detail');
       document.getElementById('gridBtn').classList.toggle('active', state.view === 'grid');
@@ -2296,6 +2472,7 @@
     function selectProduct(id, view = 'detail') {
       state.selectedProductId = id;
       state.view = view;
+      state.currentDetailSignature = createSareeDetailSignature(currentProduct());
       renderAll();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -2329,13 +2506,9 @@
           state.selectedProductId = nextProduct.id;
         }
 
-        await fetchCollections();
-        await fetchProductsFromAPI();
+        await fetchCollections({ force: true, render: true });
+        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
         showToast('Approved successfully and updated in Baserow.');
-
-        if (state.view === 'detail') {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
       } catch (error) {
         console.error(error);
         showToast('Approve failed. Check backend server logs.');
@@ -2361,8 +2534,8 @@
           throw new Error(data.error || 'Reject update failed');
         }
 
-        await fetchCollections();
-        await fetchProductsFromAPI();
+        await fetchCollections({ force: true, render: true });
+        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
         showToast('Rejected and moved to Failed.');
       } catch (error) {
         console.error(error);
@@ -2394,8 +2567,8 @@
         }
 
         closeRequestModal();
-        await fetchCollections();
-        await fetchProductsFromAPI();
+        await fetchCollections({ force: true, render: true });
+        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
         showToast('Feedback submitted and moved to Failed.');
       } catch (error) {
         console.error(error);
@@ -2583,15 +2756,20 @@
     document.getElementById('referenceSelect').addEventListener('change', e => { state.selectedReference = e.target.value; renderAll(false); });
     document.getElementById('generatedSelect').addEventListener('change', e => { state.selectedGenerated = e.target.value; renderAll(false); });
     document.getElementById('changeComment').addEventListener('input', e => document.getElementById('charCount').textContent = e.target.value.length);
-    document.getElementById('refreshBtn').addEventListener('click', refreshCacheAndProducts);
-    setInterval(() => fetchProductsFromAPI(), 15000);
+    document.getElementById('refreshBtn').addEventListener('click', syncSareeReviewNow);
 
-    fetchCollections().finally(() => fetchProductsFromAPI());
+    window.fetchProductsFromAPI = fetchProductsFromAPI;
+    window.syncSareeReviewNow = syncSareeReviewNow;
+    window.startSareeAutoSync = startSareeAutoSync;
+    window.stopSareeAutoSync = stopSareeAutoSync;
+
+    fetchCollections().finally(() => fetchProductsFromAPI({ initial: true }).finally(startSareeAutoSync));
   </script>
   <script src="/social-review.js"></script>
   <script src="/upload-saree.js"></script>
   <script>
     const reviewModeState = { activeMode: "saree" };
+    window.reviewModeState = reviewModeState;
 
     function setReviewMode(mode) {
       reviewModeState.activeMode = mode;
@@ -2602,6 +2780,14 @@
       document.getElementById("socialReviewTab").classList.toggle("active", mode === "social");
       document.getElementById("uploadSareeTab").classList.toggle("active", mode === "upload");
       if (typeof setUploadSareeActive === "function") setUploadSareeActive(mode === "upload");
+      if (typeof startSareeAutoSync === "function" && typeof stopSareeAutoSync === "function") {
+        if (mode === "saree") {
+          startSareeAutoSync();
+          fetchProductsFromAPI({ preserveDetail: true, preserveScroll: true, silent: true });
+        } else {
+          stopSareeAutoSync();
+        }
+      }
 
       if (mode === "social" && !window.__socialReviewLoaded) {
         loadSocialReviewData({ refresh: false });
