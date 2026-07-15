@@ -1370,7 +1370,9 @@
             <label>Product Title<input name="productTitle" autocomplete="off" /></label>
             <label>Product Code<input name="productCode" autocomplete="off" /></label>
             <label>Price<input name="price" inputmode="decimal" autocomplete="off" /></label>
-            <label>Category<input name="category" autocomplete="off" /></label>
+            <label>Category<select id="uploadCategory" name="category">
+              <option value="">Select category</option>
+            </select></label>
           </div>
           <label>Comment / Notes<textarea name="commentNotes" rows="4"></textarea></label>
           <div class="upload-file-grid">
@@ -1406,15 +1408,16 @@
         <button class="upload-icon-btn" type="button" onclick="closeUploadDetail()">x</button>
       </header>
       <main class="upload-detail-body">
-        <section>
-          <h3>Reference Images</h3>
+        <section class="upload-detail-compare">
+          <section class="compare-panel reference-panel">
+            <h3>Origin Saree</h3>
           <div id="uploadReferenceImages" class="upload-media-grid"></div>
-        </section>
-        <section>
-          <h3>Generated Images</h3>
+          </section>
+          <section class="compare-panel generated-panel">
+          <h3>Generated Front View</h3>
           <div id="uploadGeneratedTabs" class="upload-generated-tabs"></div>
           <div id="uploadGeneratedPreview" class="upload-generated-preview"></div>
-        </section>
+          </section>
       </main>
       <footer class="upload-detail-actions">
         <textarea id="uploadFeedbackInput" placeholder="Feedback for reject or request changes..."></textarea>

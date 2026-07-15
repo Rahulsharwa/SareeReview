@@ -26,6 +26,27 @@ const UPLOAD_GENERATED_TABS = [
   { key: "closeUp", label: "Close-Up" },
 ];
 
+const UPLOAD_SAREE_CATEGORIES = [
+  "Kanjivaram Silks",
+  "Pure Silk Sarees",
+  "Tussar Silk Saree",
+  "South Weaves \u2013 South Silk Sarees",
+  "Soft Silk Sarees",
+  "Patola & Orissa Silk Sarees",
+  "Printed Pure Silk Sarees",
+  "Cotton Silk Sarees",
+  "Paithani Silk Sarees",
+  "Banarasi Silk Sarees",
+  "Banarasi Georgette Silk Sarees",
+  "Banarasi Kora Silk Saree",
+  "Gadwal Handloom",
+  "Jamawar Silk Sarees",
+  "Cotton Saree",
+  "Linen & Kota Silk Sarees",
+  "Art Silk Sarees",
+  "Bandhani Silk Saree",
+];
+
 function uploadEscapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -53,8 +74,24 @@ function uploadIsPending(row) {
   return uploadStatusText(row).toLowerCase() === "pending";
 }
 
+function hasUploadImage(url) {
+  return typeof url === "string" && url.trim().length > 0;
+}
+
+function getUploadMainImage(row) {
+  const images = row?.images || {};
+  if (hasUploadImage(images.front)) return images.front;
+  if (hasUploadImage(images.saree)) return images.saree;
+  if (hasUploadImage(images.blouse)) return images.blouse;
+  return "";
+}
+
+function getGeneratedImage(row, key = "front") {
+  return row?.images?.[key] || row?.generated?.[key] || "";
+}
+
 function uploadMainImage(row) {
-  return row?.images?.saree || row?.images?.blouse || "";
+  return getUploadMainImage(row);
 }
 
 function createUploadImagePlaceholder(label) {
@@ -65,7 +102,7 @@ function createUploadImagePlaceholder(label) {
 }
 
 function renderUploadImage(src, label, className = "") {
-  if (!src) return `<div class="upload-placeholder">${uploadEscapeHtml(label)}<br>-</div>`;
+  if (!hasUploadImage(src)) return `<div class="upload-placeholder">${uploadEscapeHtml(label)}<br>-</div>`;
   return `<img class="${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" onerror="this.replaceWith(createUploadImagePlaceholder('${uploadEscapeAttr(label)}'))" />`;
 }
 
@@ -230,7 +267,7 @@ function renderUploadRows() {
     const approveDisabled = uploadIsPending(row) ? "" : "disabled";
     const thumbs = [
       { label: "Saree", src: row.images?.saree },
-      { label: "Blouse", src: row.images?.blouse },
+      ...(hasUploadImage(row.images?.blouse) ? [{ label: "Blouse", src: row.images.blouse }] : []),
       { label: "Front View", src: row.images?.front },
       { label: "Side View", src: row.images?.side },
       { label: "Back View", src: row.images?.back },
@@ -275,7 +312,9 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
 
   const referenceBlocks = [
     { label: "Saree Image", url: row.images?.saree, empty: "Saree image not available" },
-    { label: "Blouse Image", url: row.images?.blouse, empty: "Blouse image not uploaded" },
+    ...(hasUploadImage(row.images?.blouse)
+      ? [{ label: "Blouse Image", url: row.images.blouse, empty: "Blouse image not uploaded" }]
+      : []),
   ];
   document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
     <div class="upload-media-box">
@@ -290,8 +329,12 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
     <button class="upload-btn ${tab.key === selected.key ? "active" : ""}" type="button" onclick="selectUploadGenerated('${tab.key}')">${uploadEscapeHtml(tab.label)}</button>
   `).join("");
 
-  const selectedUrl = row.images?.[selected.key];
-  const placeholder = status.toLowerCase() === "start" ? "Generation not started yet<br>Status: Start" : "Not generated yet";
+  const selectedUrl = getGeneratedImage(row, selected.key);
+  const placeholder = status.toLowerCase() === "start"
+    ? "Generation not started yet<br>Status: Start"
+    : selected.key === "front"
+      ? "Front View not generated yet"
+      : "Not generated yet";
   document.getElementById("uploadGeneratedPreview").innerHTML = selectedUrl
     ? renderUploadImage(selectedUrl, selected.label)
     : `<div class="upload-placeholder">${placeholder}</div>`;
@@ -435,6 +478,17 @@ function clearUploadFilePreviews() {
   });
 }
 
+function populateUploadCategories() {
+  const select = document.getElementById("uploadCategory");
+  if (!select || select.options.length > 1) return;
+  UPLOAD_SAREE_CATEGORIES.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    select.appendChild(option);
+  });
+}
+
 function enhanceUploadFileInputs() {
   document.querySelectorAll(".upload-file input[type='file']").forEach((input) => {
     const label = input.closest(".upload-file");
@@ -525,6 +579,7 @@ function renderUploadFilePreview(input) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  populateUploadCategories();
   const form = document.getElementById("uploadSareeForm");
   if (form) form.addEventListener("submit", submitUploadSaree);
   enhanceUploadFileInputs();
