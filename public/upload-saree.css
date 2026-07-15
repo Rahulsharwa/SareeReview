@@ -601,6 +601,72 @@
   overflow: hidden;
 }
 
+.upload-generated-image-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.upload-fullscreen-button {
+  justify-self: stretch;
+  min-height: 50px;
+  border: 1px solid #d5b58c;
+  border-radius: 14px;
+  background: #fffaf2;
+  color: #7a0f1d;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.upload-review-actions-trigger,
+.upload-review-actions-backdrop,
+.upload-image-fullscreen {
+  display: none;
+}
+
+.upload-image-fullscreen.open {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  display: grid;
+  place-items: center;
+  background: #090909;
+  padding: max(14px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom));
+}
+
+.upload-fullscreen-stage {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.upload-fullscreen-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.upload-fullscreen-close {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: 14px;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.45);
+  background: rgba(0,0,0,.62);
+  color: #fff;
+  font-size: 27px;
+  cursor: pointer;
+}
+
 html.upload-detail-open,
 body.upload-detail-open {
   overflow: hidden;
@@ -766,6 +832,15 @@ body.upload-detail-open {
     background: #fffaf2;
     border-bottom: 1px solid #e6d7c2;
     padding-top: max(14px, env(safe-area-inset-top));
+    transform: translateY(0);
+    transition: transform 180ms ease, opacity 180ms ease;
+    will-change: transform;
+  }
+
+  .upload-detail-header.header-hidden {
+    transform: translateY(-105%);
+    opacity: 0;
+    pointer-events: none;
   }
 
   .upload-detail-body {
@@ -773,7 +848,8 @@ body.upload-detail-open {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    padding-bottom: 20px;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    touch-action: pan-y;
   }
 
   .upload-detail-compare {
@@ -782,21 +858,26 @@ body.upload-detail-open {
 
   .upload-detail-actions,
   .upload-detail-footer {
-    position: static;
-    flex: 0 0 auto;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 14px 14px calc(86px + env(safe-area-inset-bottom));
-    border-top: 1px solid #e6d7c2;
-    background: #fffaf2;
+    display: none;
   }
 
-  .upload-detail-actions input,
-  .upload-detail-actions textarea,
-  .upload-detail-actions button {
-    width: 100%;
-    min-height: 50px;
+  .upload-review-actions-trigger {
+    display: block;
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    z-index: 60;
+    width: calc(100% - 32px);
+    min-height: 56px;
+    border: 0;
+    border-radius: 16px;
+    background: #7a0f1d;
+    color: #fff;
+    font-size: 17px;
+    font-weight: 900;
+    box-shadow: 0 14px 35px rgba(65, 22, 20, 0.24);
+    cursor: pointer;
   }
 
   .upload-compare-image,
@@ -805,13 +886,13 @@ body.upload-detail-open {
   .upload-media-img,
   .upload-generated-preview {
     width: 100%;
-    min-height: 0;
-    aspect-ratio: 4 / 5;
-    max-height: 70vh;
     height: auto;
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: auto;
     background: #fffaf2;
     border-radius: 16px;
-    overflow: hidden;
+    overflow: visible;
     display: grid;
     place-items: center;
   }
@@ -822,8 +903,131 @@ body.upload-detail-open {
   .upload-media-img img,
   .upload-generated-preview img {
     width: 100%;
-    height: 100%;
+    height: auto;
+    max-height: none;
     object-fit: contain;
     display: block;
+    border-radius: 16px;
+  }
+
+  .upload-review-actions-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10020;
+    background: rgba(25, 14, 8, 0.56);
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+
+  .upload-review-actions-backdrop.open {
+    display: flex;
+  }
+
+  .upload-review-actions-sheet {
+    width: 100%;
+    max-height: min(82dvh, 720px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    background: #fffaf2;
+    border-radius: 24px 24px 0 0;
+    padding: 12px 18px calc(20px + env(safe-area-inset-bottom));
+    box-shadow: 0 -18px 55px rgba(0, 0, 0, 0.24);
+    transform: translateY(100%);
+    animation: uploadActionsSlideUp 180ms ease forwards;
+  }
+
+  .upload-actions-sheet-handle {
+    width: 46px;
+    height: 5px;
+    margin: 0 auto 14px;
+    border-radius: 999px;
+    background: #cfbca4;
+  }
+
+  .upload-actions-sheet-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .upload-actions-sheet-header h3 {
+    margin: 0;
+    color: #7a0f1d;
+    font-size: 22px;
+  }
+
+  .upload-actions-sheet-header p {
+    margin: 5px 0 0;
+    color: #776855;
+    font-size: 13px;
+  }
+
+  .upload-actions-close {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    border: 1px solid #e6d7c2;
+    background: #fff;
+    color: #7a0f1d;
+    font-size: 24px;
+    cursor: pointer;
+  }
+
+  .upload-actions-feedback {
+    width: 100%;
+    min-height: 112px;
+    border: 1px solid #e6d7c2;
+    border-radius: 16px;
+    background: #fffdf8;
+    padding: 14px;
+    resize: vertical;
+  }
+
+  .upload-actions-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 11px;
+    margin-top: 14px;
+  }
+
+  .upload-actions-buttons button {
+    width: 100%;
+    min-height: 54px;
+    border-radius: 15px;
+    font-size: 16px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .upload-actions-buttons button:disabled {
+    opacity: .42;
+    cursor: not-allowed;
+  }
+
+  .upload-action-reject {
+    background: #fff;
+    color: #b42318;
+    border: 1px solid #efb6ad;
+  }
+
+  .upload-action-request {
+    background: #fffaf2;
+    color: #8a5900;
+    border: 1px solid #dfbd68;
+  }
+
+  .upload-action-approve {
+    background: #047857;
+    color: #fff;
+    border: 1px solid #047857;
+  }
+}
+
+@keyframes uploadActionsSlideUp {
+  to {
+    transform: translateY(0);
   }
 }

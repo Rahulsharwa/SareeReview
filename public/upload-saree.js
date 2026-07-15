@@ -20,6 +20,8 @@ const uploadSareeState = {
   submitting: false,
   lastRowsSignature: "",
   currentDetailSignature: "",
+  detailLastScrollTop: 0,
+  detailHeaderHidden: false,
 };
 
 const UPLOAD_GENERATED_TABS = [
@@ -172,6 +174,14 @@ function getUploadDetailSignature(row) {
 
 function isMobileUploadView() {
   return window.matchMedia("(max-width: 760px)").matches;
+}
+
+function getUploadDetailBody() {
+  return document.getElementById("uploadDetailBody");
+}
+
+function getUploadDetailHeader() {
+  return document.getElementById("uploadDetailHeader");
 }
 
 function showUploadToast(message, isError = false) {
@@ -393,7 +403,10 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   const status = uploadStatusText(row);
   document.getElementById("uploadDetailTitle").textContent = uploadDisplay(row.productTitle, "Untitled Upload");
   document.getElementById("uploadDetailMeta").textContent = `${uploadDisplay(row.productCode, "No product code")} - ${uploadDisplay(row.category, "No category")} - Status: ${status}`;
-  document.getElementById("uploadFeedbackInput").value = row.commentNotes || "";
+  const feedback = row.commentNotes || "";
+  document.getElementById("uploadFeedbackInput").value = feedback;
+  const mobileFeedback = document.getElementById("uploadApprovalNote");
+  if (mobileFeedback) mobileFeedback.value = feedback;
 
   const referenceBlocks = [
     { label: "Origin Saree", url: row.images?.saree, empty: "Saree image not available" },
@@ -420,6 +433,11 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   const approveEnabled = uploadIsPending(row);
   approveBtn.disabled = !approveEnabled;
   approveBtn.title = approveEnabled ? "Approve generated output" : "Approve is enabled only when Generation Status is Pending";
+  const sheetApproveBtn = document.querySelector(".upload-action-approve");
+  if (sheetApproveBtn) {
+    sheetApproveBtn.disabled = !approveEnabled;
+    sheetApproveBtn.title = approveBtn.title;
+  }
 }
 
 function openUploadDetail(rowId) {
@@ -430,19 +448,63 @@ function openUploadDetail(rowId) {
   uploadSareeState.selectedRowId = rowId;
   uploadSareeState.selectedGeneratedKey = "front";
   uploadSareeState.currentDetailSignature = getUploadDetailSignature(row);
+  uploadSareeState.detailLastScrollTop = 0;
+  uploadSareeState.detailHeaderHidden = false;
   document.documentElement.classList.add("upload-detail-open");
   document.body.classList.add("upload-detail-open");
+  getUploadDetailHeader()?.classList.remove("header-hidden");
   renderUploadDetail(row, { keepOpen: false, preserveGeneratedKey: true });
   document.getElementById("uploadDetailBackdrop").classList.add("open");
+  requestAnimationFrame(() => {
+    const detailBody = getUploadDetailBody();
+    if (detailBody) detailBody.scrollTop = 0;
+    setupUploadDetailHeaderAutoHide();
+  });
 }
 
 function closeUploadDetail() {
   uploadSareeState.detailOpen = false;
   uploadSareeState.currentRowId = null;
   uploadSareeState.currentDetailSignature = "";
+  uploadSareeState.detailLastScrollTop = 0;
+  uploadSareeState.detailHeaderHidden = false;
   document.documentElement.classList.remove("upload-detail-open");
   document.body.classList.remove("upload-detail-open");
+  getUploadDetailHeader()?.classList.remove("header-hidden");
+  closeUploadReviewActions();
+  closeUploadImageFullscreen();
   document.getElementById("uploadDetailBackdrop").classList.remove("open");
+}
+
+function setupUploadDetailHeaderAutoHide() {
+  const detailBody = getUploadDetailBody();
+  const detailHeader = getUploadDetailHeader();
+  if (!detailBody || !detailHeader) return;
+  detailBody.removeEventListener("scroll", handleUploadDetailScroll);
+  detailBody.addEventListener("scroll", handleUploadDetailScroll, { passive: true });
+}
+
+function handleUploadDetailScroll(event) {
+  if (!isMobileUploadView()) return;
+
+  const detailBody = event.currentTarget;
+  const currentScrollTop = Math.max(0, detailBody.scrollTop);
+  const previousScrollTop = uploadSareeState.detailLastScrollTop || 0;
+  const header = getUploadDetailHeader();
+  if (!header) return;
+
+  if (currentScrollTop <= 24) {
+    header.classList.remove("header-hidden");
+    uploadSareeState.detailHeaderHidden = false;
+  } else if (currentScrollTop > previousScrollTop + 6) {
+    header.classList.add("header-hidden");
+    uploadSareeState.detailHeaderHidden = true;
+  } else if (currentScrollTop < previousScrollTop - 6) {
+    header.classList.remove("header-hidden");
+    uploadSareeState.detailHeaderHidden = false;
+  }
+
+  uploadSareeState.detailLastScrollTop = currentScrollTop;
 }
 
 function uploadGeneratedPlaceholder(row, key) {
@@ -467,6 +529,41 @@ function renderUploadGeneratedStage(row, key, url) {
   stage.innerHTML = hasUploadImage(url)
     ? renderUploadImage(url, tab.label)
     : `<div class="upload-empty-media">${uploadGeneratedPlaceholder(row, key)}</div>`;
+}
+
+function getCurrentUploadGeneratedUrl() {
+  const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(uploadSareeState.currentRowId));
+  if (!row) return "";
+  const key = uploadSareeState.selectedGeneratedKey || "front";
+  return getUploadGeneratedImage(row, key);
+}
+
+function openUploadImageFullscreen() {
+  const url = getCurrentUploadGeneratedUrl();
+  if (!hasUploadImage(url)) {
+    showUploadToast("Generated image is not available.", true);
+    return;
+  }
+
+  const viewer = document.getElementById("uploadImageFullscreen");
+  const image = document.getElementById("uploadFullscreenImage");
+  if (!viewer || !image) return;
+
+  image.src = url;
+  viewer.classList.add("open");
+}
+
+function closeUploadImageFullscreen() {
+  const viewer = document.getElementById("uploadImageFullscreen");
+  const image = document.getElementById("uploadFullscreenImage");
+  viewer?.classList.remove("open");
+  if (image) image.removeAttribute("src");
+}
+
+function handleUploadFullscreenBackdrop(event) {
+  if (event.target.id === "uploadImageFullscreen") {
+    closeUploadImageFullscreen();
+  }
 }
 
 function updateUploadGeneratedTabs() {
@@ -536,13 +633,14 @@ async function submitUploadSaree(event) {
 async function updateUploadStatus(action) {
   const row = currentUploadRow();
   if (!row) return;
-  const feedback = document.getElementById("uploadFeedbackInput").value || "";
+  const feedback = getUploadFeedbackValue();
   try {
     await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ feedback }),
     });
+    closeUploadReviewActions();
     await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
     const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
     if (updatedRow) {
@@ -571,6 +669,43 @@ function rejectUploadSaree() {
 }
 
 function requestUploadChanges() {
+  updateUploadStatus("request-changes");
+}
+
+function getUploadFeedbackValue() {
+  const sheetFeedback = document.getElementById("uploadApprovalNote")?.value || "";
+  const footerFeedback = document.getElementById("uploadFeedbackInput")?.value || "";
+  return isMobileUploadView() ? sheetFeedback : footerFeedback;
+}
+
+function openUploadReviewActions() {
+  const backdrop = document.getElementById("uploadReviewActionsBackdrop");
+  if (!backdrop) return;
+  const footerFeedback = document.getElementById("uploadFeedbackInput")?.value || "";
+  const sheetFeedback = document.getElementById("uploadApprovalNote");
+  if (sheetFeedback && !sheetFeedback.value) sheetFeedback.value = footerFeedback;
+  backdrop.classList.add("open");
+}
+
+function closeUploadReviewActions() {
+  document.getElementById("uploadReviewActionsBackdrop")?.classList.remove("open");
+}
+
+function handleUploadReviewActionsBackdrop(event) {
+  if (event.target.id === "uploadReviewActionsBackdrop") {
+    closeUploadReviewActions();
+  }
+}
+
+function approveUploadCurrent() {
+  updateUploadStatus("approve");
+}
+
+function rejectUploadCurrent() {
+  updateUploadStatus("reject");
+}
+
+function requestChangesUploadCurrent() {
   updateUploadStatus("request-changes");
 }
 

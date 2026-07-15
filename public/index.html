@@ -1404,14 +1404,14 @@
 
   <div id="uploadDetailBackdrop" class="upload-detail-backdrop">
     <aside class="upload-detail upload-detail-panel">
-      <header class="upload-detail-head upload-detail-header">
+      <header id="uploadDetailHeader" class="upload-detail-head upload-detail-header">
         <div>
           <h2 id="uploadDetailTitle">Upload Detail</h2>
           <p id="uploadDetailMeta">Review generated images</p>
         </div>
         <button class="upload-icon-btn" type="button" onclick="closeUploadDetail()">x</button>
       </header>
-      <main class="upload-detail-body">
+      <main id="uploadDetailBody" class="upload-detail-body">
         <section class="upload-detail-compare">
           <section class="compare-panel reference-panel">
             <h3>Origin Saree</h3>
@@ -1420,7 +1420,10 @@
           <section class="compare-panel generated-panel">
             <h3>Generated Front View</h3>
             <div id="uploadGeneratedTabs" class="upload-generated-tabs"></div>
-            <div id="uploadGeneratedPreview" class="upload-generated-preview upload-generated-stage"></div>
+            <div class="upload-generated-image-wrap">
+              <div id="uploadGeneratedPreview" class="upload-generated-preview upload-generated-stage"></div>
+              <button class="upload-fullscreen-button" type="button" onclick="openUploadImageFullscreen()">View Full Screen</button>
+            </div>
           </section>
         </section>
       </main>
@@ -1430,7 +1433,67 @@
         <button class="upload-btn warning" type="button" onclick="requestUploadChanges()">Request Changes</button>
         <button class="upload-btn primary" id="uploadApproveBtn" type="button" onclick="approveUploadSaree()">Approve</button>
       </footer>
+      <button
+        type="button"
+        id="uploadReviewActionsButton"
+        class="upload-review-actions-trigger"
+        onclick="openUploadReviewActions()"
+      >Review Actions</button>
     </aside>
+  </div>
+
+  <div
+    id="uploadReviewActionsBackdrop"
+    class="upload-review-actions-backdrop"
+    onclick="handleUploadReviewActionsBackdrop(event)"
+  >
+    <section
+      id="uploadReviewActionsSheet"
+      class="upload-review-actions-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="uploadReviewActionsTitle"
+    >
+      <div class="upload-actions-sheet-handle"></div>
+      <div class="upload-actions-sheet-header">
+        <div>
+          <h3 id="uploadReviewActionsTitle">Review Actions</h3>
+          <p>Approve the generated saree or submit correction feedback.</p>
+        </div>
+        <button
+          type="button"
+          class="upload-actions-close"
+          onclick="closeUploadReviewActions()"
+          aria-label="Close review actions"
+        >x</button>
+      </div>
+      <textarea
+        id="uploadApprovalNote"
+        class="upload-actions-feedback"
+        placeholder="Feedback for reject or request changes..."
+      ></textarea>
+      <div class="upload-actions-buttons">
+        <button type="button" class="upload-action-reject" onclick="rejectUploadCurrent()">Reject</button>
+        <button type="button" class="upload-action-request" onclick="requestChangesUploadCurrent()">Request Changes</button>
+        <button type="button" class="upload-action-approve" onclick="approveUploadCurrent()">Approve</button>
+      </div>
+    </section>
+  </div>
+
+  <div
+    id="uploadImageFullscreen"
+    class="upload-image-fullscreen"
+    onclick="handleUploadFullscreenBackdrop(event)"
+  >
+    <button
+      type="button"
+      class="upload-fullscreen-close"
+      onclick="closeUploadImageFullscreen()"
+      aria-label="Close full screen image"
+    >x</button>
+    <div class="upload-fullscreen-stage">
+      <img id="uploadFullscreenImage" src="" alt="Full screen generated saree" />
+    </div>
   </div>
 
   <div id="socialEditorBackdrop" class="social-editor-backdrop">
