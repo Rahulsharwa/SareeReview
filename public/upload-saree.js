@@ -16,7 +16,10 @@ const uploadSareeState = {
   detailOpen: false,
   currentRowId: null,
   loadingRecent: false,
+  isSyncing: false,
   submitting: false,
+  lastRowsSignature: "",
+  currentDetailSignature: "",
 };
 
 const UPLOAD_GENERATED_TABS = [
@@ -79,19 +82,27 @@ function hasUploadImage(url) {
 }
 
 function getUploadMainImage(row) {
+  const status = String(row?.generationStatus || row?.status || "").trim().toLowerCase();
   const images = row?.images || {};
-  if (hasUploadImage(images.front)) return images.front;
-  if (hasUploadImage(images.saree)) return images.saree;
-  if (hasUploadImage(images.blouse)) return images.blouse;
-  return "";
+  if ((status === "pending" || status === "approved") && hasUploadImage(images.front)) {
+    return { url: images.front, type: "generated", label: "Front View" };
+  }
+  if (hasUploadImage(images.front)) return { url: images.front, type: "generated", label: "Front View" };
+  if (hasUploadImage(images.saree)) return { url: images.saree, type: "reference", label: "Saree Image" };
+  if (hasUploadImage(images.blouse)) return { url: images.blouse, type: "reference", label: "Blouse Image" };
+  return { url: "", type: "empty", label: "No reference image" };
 }
 
-function getGeneratedImage(row, key = "front") {
+function getUploadGeneratedImage(row, key = "front") {
   return row?.images?.[key] || row?.generated?.[key] || "";
 }
 
+function getGeneratedImage(row, key = "front") {
+  return getUploadGeneratedImage(row, key);
+}
+
 function uploadMainImage(row) {
-  return getUploadMainImage(row);
+  return getUploadMainImage(row).url;
 }
 
 function createUploadImagePlaceholder(label) {
@@ -102,8 +113,65 @@ function createUploadImagePlaceholder(label) {
 }
 
 function renderUploadImage(src, label, className = "") {
-  if (!hasUploadImage(src)) return `<div class="upload-placeholder">${uploadEscapeHtml(label)}<br>-</div>`;
-  return `<img class="${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" onerror="this.replaceWith(createUploadImagePlaceholder('${uploadEscapeAttr(label)}'))" />`;
+  if (!hasUploadImage(src)) {
+    return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
+  }
+  return `<img class="${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" decoding="async" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
+}
+
+function handleUploadImageError(image, label) {
+  const parent = image.parentElement;
+  image.remove();
+  if (!parent) return;
+  parent.classList.add("image-failed");
+  parent.innerHTML = `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>Image unavailable</div>`;
+}
+
+function preloadUploadImage(url) {
+  return new Promise((resolve) => {
+    if (!hasUploadImage(url)) {
+      resolve(false);
+      return;
+    }
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
+}
+
+function stableUploadRowsSignature(rows) {
+  return JSON.stringify((rows || []).map((row) => ({
+    rowId: row.rowId,
+    status: row.generationStatus || row.status || "",
+    saree: row.images?.saree || "",
+    blouse: row.images?.blouse || "",
+    front: row.images?.front || "",
+    side: row.images?.side || "",
+    back: row.images?.back || "",
+    closeUp: row.images?.closeUp || "",
+    title: row.productTitle || "",
+    code: row.productCode || "",
+    category: row.category || "",
+    price: row.price || "",
+  })));
+}
+
+function getUploadDetailSignature(row) {
+  return JSON.stringify({
+    rowId: row.rowId,
+    status: row.generationStatus || row.status || "",
+    saree: row.images?.saree || "",
+    blouse: row.images?.blouse || "",
+    front: row.images?.front || "",
+    side: row.images?.side || "",
+    back: row.images?.back || "",
+    closeUp: row.images?.closeUp || "",
+  });
+}
+
+function isMobileUploadView() {
+  return window.matchMedia("(max-width: 760px)").matches;
 }
 
 function showUploadToast(message, isError = false) {
@@ -200,11 +268,13 @@ async function loadRecentUploadSarees(options = {}) {
     silent = false,
   } = options;
   const root = document.getElementById("uploadRecentRows");
+  if (uploadSareeState.isSyncing) return;
   if (!silent && !uploadSareeState.rows.length) {
     root.innerHTML = `<div class="upload-empty">Loading uploaded sarees...</div>`;
   }
 
   try {
+    uploadSareeState.isSyncing = true;
     uploadSareeState.loadingRecent = true;
     const response = await fetch(`${UPLOAD_API.recent}${force ? "?refresh=1" : ""}`, {
       method: "GET",
@@ -214,23 +284,34 @@ async function loadRecentUploadSarees(options = {}) {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 && data.error === "Review password required.") {
       await uploadAuthenticate();
+      uploadSareeState.isSyncing = false;
       return loadRecentUploadSarees({ force, preserveDetail, silent });
     }
     if (!response.ok) throw new Error(data.error || data.message || "Unable to load uploaded sarees.");
 
-    uploadSareeState.rows = Array.isArray(data.rows)
+    const nextRows = Array.isArray(data.rows)
       ? data.rows
       : Array.isArray(data.uploads)
         ? data.uploads
         : [];
-    renderUploadRows();
+
+    const nextSignature = stableUploadRowsSignature(nextRows);
+    if (uploadSareeState.lastRowsSignature !== nextSignature) {
+      uploadSareeState.lastRowsSignature = nextSignature;
+      uploadSareeState.rows = nextRows;
+      renderUploadRows();
+    }
     updateUploadSyncTime();
 
     if (preserveDetail && uploadSareeState.detailOpen && uploadSareeState.currentRowId) {
       const updatedRow = uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
       if (updatedRow) {
         uploadSareeState.selectedRowId = updatedRow.rowId;
-        renderUploadDetail(updatedRow, { keepOpen: true });
+        const nextDetailSignature = getUploadDetailSignature(updatedRow);
+        if (uploadSareeState.currentDetailSignature !== nextDetailSignature) {
+          uploadSareeState.currentDetailSignature = nextDetailSignature;
+          renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
+        }
       }
     }
 
@@ -240,6 +321,7 @@ async function loadRecentUploadSarees(options = {}) {
     root.innerHTML = `<div class="upload-empty">Upload API failed: ${uploadEscapeHtml(error.message)}</div>`;
   } finally {
     uploadSareeState.loadingRecent = false;
+    uploadSareeState.isSyncing = false;
   }
 }
 
@@ -265,23 +347,25 @@ function renderUploadRows() {
     const status = uploadStatusText(row);
     const statusClass = uploadStatusClass(status);
     const approveDisabled = uploadIsPending(row) ? "" : "disabled";
-    const thumbs = [
-      { label: "Saree", src: row.images?.saree },
-      ...(hasUploadImage(row.images?.blouse) ? [{ label: "Blouse", src: row.images.blouse }] : []),
-      { label: "Front View", src: row.images?.front },
-      { label: "Side View", src: row.images?.side },
-      { label: "Back View", src: row.images?.back },
-      { label: "Close-Up", src: row.images?.closeUp },
-    ].map((item) => `
+    const mainImage = getUploadMainImage(row);
+    const referenceThumbs = [
+      { key: "saree", label: "Saree", url: row.images?.saree },
+      ...(hasUploadImage(row.images?.blouse) ? [{ key: "blouse", label: "Blouse", url: row.images.blouse }] : []),
+      { key: "front", label: "Front View", url: row.images?.front },
+      { key: "side", label: "Side View", url: row.images?.side },
+      { key: "back", label: "Back View", url: row.images?.back },
+      { key: "closeUp", label: "Close-Up", url: row.images?.closeUp },
+    ];
+    const thumbs = referenceThumbs.map((item) => `
       <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
-        <div class="upload-thumb-media">${renderUploadImage(item.src, item.label)}</div>
+        <div class="upload-thumb-media">${renderUploadImage(item.url, item.label)}</div>
         <span>${uploadEscapeHtml(item.label)}</span>
       </div>
     `).join("");
 
     return `
       <article class="upload-card">
-        <div class="upload-card-media">${renderUploadImage(uploadMainImage(row), "No reference image", "upload-card-main-img")}</div>
+        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadImage(mainImage.url, mainImage.label, "upload-card-main-img")}</div>
         <div class="upload-card-body">
           <div class="upload-card-kicker">${uploadEscapeHtml(uploadDisplay(row.productCode, "No product code"))}</div>
           <div class="upload-card-title">${uploadEscapeHtml(uploadDisplay(row.productTitle, "Untitled Upload"))}</div>
@@ -304,6 +388,7 @@ function renderUploadRows() {
 
 function renderUploadDetail(row = currentUploadRow(), options = {}) {
   if (!row) return;
+  if (options.preserveGeneratedKey !== true) uploadSareeState.selectedGeneratedKey = "front";
 
   const status = uploadStatusText(row);
   document.getElementById("uploadDetailTitle").textContent = uploadDisplay(row.productTitle, "Untitled Upload");
@@ -311,7 +396,7 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   document.getElementById("uploadFeedbackInput").value = row.commentNotes || "";
 
   const referenceBlocks = [
-    { label: "Saree Image", url: row.images?.saree, empty: "Saree image not available" },
+    { label: "Origin Saree", url: row.images?.saree, empty: "Saree image not available" },
     ...(hasUploadImage(row.images?.blouse)
       ? [{ label: "Blouse Image", url: row.images.blouse, empty: "Blouse image not uploaded" }]
       : []),
@@ -319,25 +404,17 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
     <div class="upload-media-box">
       <div class="upload-media-label">${uploadEscapeHtml(item.label)}</div>
-      <div class="upload-media-img">${item.url ? renderUploadImage(item.url, item.label) : `<div class="upload-placeholder">${uploadEscapeHtml(item.empty)}</div>`}</div>
+      <div class="upload-media-img upload-compare-image upload-reference-stage">${hasUploadImage(item.url) ? renderUploadImage(item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
     </div>
   `).join("");
 
   const selected = UPLOAD_GENERATED_TABS.find((tab) => tab.key === uploadSareeState.selectedGeneratedKey) || UPLOAD_GENERATED_TABS[0];
   uploadSareeState.selectedGeneratedKey = selected.key;
   document.getElementById("uploadGeneratedTabs").innerHTML = UPLOAD_GENERATED_TABS.map((tab) => `
-    <button class="upload-btn ${tab.key === selected.key ? "active" : ""}" type="button" onclick="selectUploadGenerated('${tab.key}')">${uploadEscapeHtml(tab.label)}</button>
+    <button class="upload-btn ${tab.key === selected.key ? "active" : ""}" type="button" data-key="${uploadEscapeAttr(tab.key)}" onclick="selectUploadGenerated('${tab.key}')">${uploadEscapeHtml(tab.label)}</button>
   `).join("");
 
-  const selectedUrl = getGeneratedImage(row, selected.key);
-  const placeholder = status.toLowerCase() === "start"
-    ? "Generation not started yet<br>Status: Start"
-    : selected.key === "front"
-      ? "Front View not generated yet"
-      : "Not generated yet";
-  document.getElementById("uploadGeneratedPreview").innerHTML = selectedUrl
-    ? renderUploadImage(selectedUrl, selected.label)
-    : `<div class="upload-placeholder">${placeholder}</div>`;
+  renderUploadGeneratedStage(row, selected.key, getUploadGeneratedImage(row, selected.key));
 
   const approveBtn = document.getElementById("uploadApproveBtn");
   const approveEnabled = uploadIsPending(row);
@@ -352,17 +429,72 @@ function openUploadDetail(rowId) {
   uploadSareeState.currentRowId = rowId;
   uploadSareeState.selectedRowId = rowId;
   uploadSareeState.selectedGeneratedKey = "front";
-  renderUploadDetail(row, { keepOpen: false });
+  uploadSareeState.currentDetailSignature = getUploadDetailSignature(row);
+  document.documentElement.classList.add("upload-detail-open");
+  document.body.classList.add("upload-detail-open");
+  renderUploadDetail(row, { keepOpen: false, preserveGeneratedKey: true });
   document.getElementById("uploadDetailBackdrop").classList.add("open");
 }
 
 function closeUploadDetail() {
   uploadSareeState.detailOpen = false;
   uploadSareeState.currentRowId = null;
+  uploadSareeState.currentDetailSignature = "";
+  document.documentElement.classList.remove("upload-detail-open");
+  document.body.classList.remove("upload-detail-open");
   document.getElementById("uploadDetailBackdrop").classList.remove("open");
 }
 
-function selectUploadGenerated(key) {
+function uploadGeneratedPlaceholder(row, key) {
+  const status = uploadStatusText(row);
+  const lowerStatus = status.toLowerCase();
+  if (lowerStatus === "start") return "Generation not started yet<br>Status: Start";
+  if (lowerStatus === "pending") return `${key === "front" ? "Front View" : "Selected view"} not generated yet<br>Status: Pending`;
+  return `${key === "front" ? "Front View" : "Selected view"} not generated yet<br>Status: ${uploadEscapeHtml(status)}`;
+}
+
+function renderMissingUploadGeneratedView(row, key) {
+  const stage = document.getElementById("uploadGeneratedPreview");
+  if (!stage) return;
+  stage.innerHTML = `<div class="upload-empty-media">${uploadGeneratedPlaceholder(row, key)}</div>`;
+  updateUploadGeneratedTabs();
+}
+
+function renderUploadGeneratedStage(row, key, url) {
+  const stage = document.getElementById("uploadGeneratedPreview");
+  if (!stage) return;
+  const tab = UPLOAD_GENERATED_TABS.find((item) => item.key === key) || UPLOAD_GENERATED_TABS[0];
+  stage.innerHTML = hasUploadImage(url)
+    ? renderUploadImage(url, tab.label)
+    : `<div class="upload-empty-media">${uploadGeneratedPlaceholder(row, key)}</div>`;
+}
+
+function updateUploadGeneratedTabs() {
+  document.querySelectorAll("#uploadGeneratedTabs button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.key === uploadSareeState.selectedGeneratedKey);
+  });
+}
+
+async function selectUploadGenerated(key) {
+  const row = currentUploadRow();
+  if (!row) return;
+  const url = getUploadGeneratedImage(row, key);
+  if (!hasUploadImage(url)) {
+    uploadSareeState.selectedGeneratedKey = key;
+    renderMissingUploadGeneratedView(row, key);
+    return;
+  }
+  const loaded = await preloadUploadImage(url);
+  uploadSareeState.selectedGeneratedKey = key;
+  if (!loaded) {
+    renderMissingUploadGeneratedView(row, key);
+    return;
+  }
+  renderUploadGeneratedStage(row, key, url);
+  updateUploadGeneratedTabs();
+}
+
+function selectUploadGeneratedLegacy(key) {
   uploadSareeState.selectedGeneratedKey = key;
   renderUploadDetail();
 }
@@ -415,7 +547,8 @@ async function updateUploadStatus(action) {
     const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
     if (updatedRow) {
       uploadSareeState.selectedRowId = updatedRow.rowId;
-      renderUploadDetail();
+      uploadSareeState.currentDetailSignature = getUploadDetailSignature(updatedRow);
+      renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
     }
     showUploadToast(action === "approve" ? "Upload approved." : "Upload moved to Failed.");
   } catch (error) {
@@ -461,6 +594,7 @@ function startUploadAutoSync() {
   uploadSareeState.syncTimer = setInterval(() => {
     if (!uploadSareeState.active) return;
     if (uploadSareeState.submitting) return;
+    if (uploadSareeState.detailOpen && isMobileUploadView()) return;
     loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
   }, 15000);
 }
