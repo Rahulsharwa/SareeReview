@@ -2644,7 +2644,7 @@ app.patch("/api/upload-saree/:rowId/approve", requireSocialReviewAuth, async (re
 
 app.patch("/api/upload-saree/:rowId/reject", requireSocialReviewAuth, async (req, res) => {
   try {
-    const feedback = String(req.body?.feedback || req.body?.comment || "").trim();
+    const feedback = String(req.body?.feedback || req.body?.comment || req.body?.note || "").trim();
     const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
     res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
   } catch (error) {
@@ -2654,7 +2654,7 @@ app.patch("/api/upload-saree/:rowId/reject", requireSocialReviewAuth, async (req
 
 app.patch("/api/upload-saree/:rowId/request-changes", requireSocialReviewAuth, async (req, res) => {
   try {
-    const feedback = String(req.body?.feedback || req.body?.comment || "").trim();
+    const feedback = String(req.body?.feedback || req.body?.comment || req.body?.note || "").trim();
     const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
     res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
   } catch (error) {

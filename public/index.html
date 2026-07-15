@@ -1422,7 +1422,7 @@
             <div id="uploadGeneratedTabs" class="upload-generated-tabs"></div>
             <div class="upload-generated-image-wrap">
               <div id="uploadGeneratedPreview" class="upload-generated-preview upload-generated-stage"></div>
-              <button class="upload-fullscreen-button" type="button" onclick="openUploadImageFullscreen()">View Full Screen</button>
+              <button id="uploadFullscreenButton" class="upload-fullscreen-button" type="button" onclick="openUploadImageFullscreen(event)">View Full Screen</button>
             </div>
           </section>
         </section>
@@ -1437,7 +1437,7 @@
         type="button"
         id="uploadReviewActionsButton"
         class="upload-review-actions-trigger"
-        onclick="openUploadReviewActions()"
+        onclick="openUploadReviewActions(event)"
       >Review Actions</button>
     </aside>
   </div>
@@ -1445,6 +1445,7 @@
   <div
     id="uploadReviewActionsBackdrop"
     class="upload-review-actions-backdrop"
+    aria-hidden="true"
     onclick="handleUploadReviewActionsBackdrop(event)"
   >
     <section
@@ -1453,6 +1454,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="uploadReviewActionsTitle"
+      onclick="event.stopPropagation()"
     >
       <div class="upload-actions-sheet-handle"></div>
       <div class="upload-actions-sheet-header">
@@ -1461,9 +1463,10 @@
           <p>Approve the generated saree or submit correction feedback.</p>
         </div>
         <button
+          id="uploadReviewActionsClose"
           type="button"
           class="upload-actions-close"
-          onclick="closeUploadReviewActions()"
+          onclick="closeUploadReviewActions(event)"
           aria-label="Close review actions"
         >x</button>
       </div>
@@ -1473,9 +1476,9 @@
         placeholder="Feedback for reject or request changes..."
       ></textarea>
       <div class="upload-actions-buttons">
-        <button type="button" class="upload-action-reject" onclick="rejectUploadCurrent()">Reject</button>
-        <button type="button" class="upload-action-request" onclick="requestChangesUploadCurrent()">Request Changes</button>
-        <button type="button" class="upload-action-approve" onclick="approveUploadCurrent()">Approve</button>
+        <button id="uploadRejectButton" type="button" class="upload-action-reject" onclick="rejectUploadCurrent(event)">Reject</button>
+        <button id="uploadRequestChangesButton" type="button" class="upload-action-request" onclick="requestChangesUploadCurrent(event)">Request Changes</button>
+        <button id="uploadApproveButton" type="button" class="upload-action-approve" onclick="approveUploadCurrent(event)">Approve</button>
       </div>
     </section>
   </div>
@@ -1483,16 +1486,18 @@
   <div
     id="uploadImageFullscreen"
     class="upload-image-fullscreen"
+    aria-hidden="true"
     onclick="handleUploadFullscreenBackdrop(event)"
   >
     <button
+      id="uploadFullscreenClose"
       type="button"
       class="upload-fullscreen-close"
-      onclick="closeUploadImageFullscreen()"
+      onclick="closeUploadImageFullscreen(event)"
       aria-label="Close full screen image"
     >x</button>
-    <div class="upload-fullscreen-stage">
-      <img id="uploadFullscreenImage" src="" alt="Full screen generated saree" />
+    <div class="upload-fullscreen-stage" onclick="event.stopPropagation()">
+      <img id="uploadFullscreenImage" alt="" />
     </div>
   </div>
 

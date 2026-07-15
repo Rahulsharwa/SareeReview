@@ -615,6 +615,9 @@
   color: #7a0f1d;
   font-weight: 900;
   cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
 }
 
 .upload-review-actions-trigger,
@@ -626,7 +629,7 @@
 .upload-image-fullscreen.open {
   position: fixed;
   inset: 0;
-  z-index: 10100;
+  z-index: 11000;
   display: grid;
   place-items: center;
   background: #090909;
@@ -672,6 +675,11 @@ body.upload-detail-open {
   overflow: hidden;
   height: 100%;
   touch-action: none;
+}
+
+html.upload-fullscreen-open,
+body.upload-fullscreen-open {
+  overflow: hidden;
 }
 
 .upload-toast {
@@ -878,6 +886,7 @@ body.upload-detail-open {
     font-weight: 900;
     box-shadow: 0 14px 35px rgba(65, 22, 20, 0.24);
     cursor: pointer;
+    pointer-events: auto;
   }
 
   .upload-compare-image,
@@ -1000,6 +1009,9 @@ body.upload-detail-open {
     font-size: 16px;
     font-weight: 900;
     cursor: pointer;
+    pointer-events: auto;
+    position: relative;
+    z-index: 2;
   }
 
   .upload-actions-buttons button:disabled {

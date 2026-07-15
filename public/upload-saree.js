@@ -433,11 +433,14 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   const approveEnabled = uploadIsPending(row);
   approveBtn.disabled = !approveEnabled;
   approveBtn.title = approveEnabled ? "Approve generated output" : "Approve is enabled only when Generation Status is Pending";
-  const sheetApproveBtn = document.querySelector(".upload-action-approve");
+  const sheetApproveBtn = document.getElementById("uploadApproveButton");
   if (sheetApproveBtn) {
     sheetApproveBtn.disabled = !approveEnabled;
     sheetApproveBtn.title = approveBtn.title;
   }
+  requestAnimationFrame(() => {
+    bindUploadDetailActions();
+  });
 }
 
 function openUploadDetail(rowId) {
@@ -538,7 +541,14 @@ function getCurrentUploadGeneratedUrl() {
   return getUploadGeneratedImage(row, key);
 }
 
-function openUploadImageFullscreen() {
+function getCurrentUploadRow() {
+  return uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId)) || null;
+}
+
+function openUploadImageFullscreen(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
   const url = getCurrentUploadGeneratedUrl();
   if (!hasUploadImage(url)) {
     showUploadToast("Generated image is not available.", true);
@@ -547,22 +557,36 @@ function openUploadImageFullscreen() {
 
   const viewer = document.getElementById("uploadImageFullscreen");
   const image = document.getElementById("uploadFullscreenImage");
-  if (!viewer || !image) return;
+  if (!viewer || !image) {
+    console.error("Fullscreen viewer elements are missing.");
+    showUploadToast("Unable to open full-screen image.", true);
+    return;
+  }
 
   image.src = url;
+  image.alt = "Generated saree full screen";
   viewer.classList.add("open");
+  viewer.setAttribute("aria-hidden", "false");
+  document.documentElement.classList.add("upload-fullscreen-open");
+  document.body.classList.add("upload-fullscreen-open");
 }
 
-function closeUploadImageFullscreen() {
+function closeUploadImageFullscreen(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
   const viewer = document.getElementById("uploadImageFullscreen");
   const image = document.getElementById("uploadFullscreenImage");
   viewer?.classList.remove("open");
+  viewer?.setAttribute("aria-hidden", "true");
   if (image) image.removeAttribute("src");
+  document.documentElement.classList.remove("upload-fullscreen-open");
+  document.body.classList.remove("upload-fullscreen-open");
 }
 
 function handleUploadFullscreenBackdrop(event) {
   if (event.target.id === "uploadImageFullscreen") {
-    closeUploadImageFullscreen();
+    closeUploadImageFullscreen(event);
   }
 }
 
@@ -630,15 +654,48 @@ async function submitUploadSaree(event) {
   }
 }
 
-async function updateUploadStatus(action) {
+function setUploadActionLoading(loading) {
   const row = currentUploadRow();
-  if (!row) return;
+  const approveAllowed = uploadIsPending(row);
+  [
+    "uploadRejectButton",
+    "uploadRequestChangesButton",
+    "uploadApproveButton",
+  ].forEach((id) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.disabled = Boolean(loading) || (id === "uploadApproveButton" && !approveAllowed);
+    button.setAttribute("aria-busy", loading ? "true" : "false");
+  });
+}
+
+async function updateUploadStatus(action, event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
+  const row = currentUploadRow();
+  if (!row) {
+    showUploadToast("No upload row selected.", true);
+    return;
+  }
+
+  if (action === "approve" && !uploadIsPending(row)) {
+    showUploadToast("Only Pending rows can be approved.", true);
+    return;
+  }
+
   const feedback = getUploadFeedbackValue();
+  if (action === "request-changes" && !feedback.trim()) {
+    showUploadToast("Please enter feedback for requested changes.", true);
+    return;
+  }
+
+  setUploadActionLoading(true);
   try {
     await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ feedback }),
+      body: JSON.stringify({ feedback, comment: feedback, note: feedback }),
     });
     closeUploadReviewActions();
     await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
@@ -648,28 +705,37 @@ async function updateUploadStatus(action) {
       uploadSareeState.currentDetailSignature = getUploadDetailSignature(updatedRow);
       renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
     }
-    showUploadToast(action === "approve" ? "Upload approved." : "Upload moved to Failed.");
+    showUploadToast(action === "approve"
+      ? "Approved successfully."
+      : action === "reject"
+        ? "Rejected successfully."
+        : "Changes requested successfully.");
   } catch (error) {
+    console.error(`Upload ${action} failed:`, error);
     setUploadMessage(error.message, true);
-    showUploadToast(error.message, true);
+    showUploadToast(error.message || `${action} failed.`, true);
+  } finally {
+    setUploadActionLoading(false);
   }
 }
 
-function approveUploadSaree() {
-  updateUploadStatus("approve");
+function approveUploadSaree(event) {
+  updateUploadStatus("approve", event);
 }
 
-function approveUploadSareeFromCard(rowId) {
+function approveUploadSareeFromCard(rowId, event) {
+  event?.preventDefault();
+  event?.stopPropagation();
   uploadSareeState.selectedRowId = rowId;
-  updateUploadStatus("approve");
+  updateUploadStatus("approve", event);
 }
 
-function rejectUploadSaree() {
-  updateUploadStatus("reject");
+function rejectUploadSaree(event) {
+  updateUploadStatus("reject", event);
 }
 
-function requestUploadChanges() {
-  updateUploadStatus("request-changes");
+function requestUploadChanges(event) {
+  updateUploadStatus("request-changes", event);
 }
 
 function getUploadFeedbackValue() {
@@ -678,35 +744,67 @@ function getUploadFeedbackValue() {
   return isMobileUploadView() ? sheetFeedback : footerFeedback;
 }
 
-function openUploadReviewActions() {
+function openUploadReviewActions(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
   const backdrop = document.getElementById("uploadReviewActionsBackdrop");
-  if (!backdrop) return;
+  if (!backdrop) {
+    console.error("Review Actions backdrop is missing.");
+    showUploadToast("Unable to open review actions.", true);
+    return;
+  }
   const footerFeedback = document.getElementById("uploadFeedbackInput")?.value || "";
   const sheetFeedback = document.getElementById("uploadApprovalNote");
   if (sheetFeedback && !sheetFeedback.value) sheetFeedback.value = footerFeedback;
   backdrop.classList.add("open");
+  backdrop.setAttribute("aria-hidden", "false");
 }
 
-function closeUploadReviewActions() {
-  document.getElementById("uploadReviewActionsBackdrop")?.classList.remove("open");
+function closeUploadReviewActions(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
+  const backdrop = document.getElementById("uploadReviewActionsBackdrop");
+  backdrop?.classList.remove("open");
+  backdrop?.setAttribute("aria-hidden", "true");
 }
 
 function handleUploadReviewActionsBackdrop(event) {
   if (event.target.id === "uploadReviewActionsBackdrop") {
-    closeUploadReviewActions();
+    closeUploadReviewActions(event);
   }
 }
 
-function approveUploadCurrent() {
-  updateUploadStatus("approve");
+function approveUploadCurrent(event) {
+  updateUploadStatus("approve", event);
 }
 
-function rejectUploadCurrent() {
-  updateUploadStatus("reject");
+function rejectUploadCurrent(event) {
+  updateUploadStatus("reject", event);
 }
 
-function requestChangesUploadCurrent() {
-  updateUploadStatus("request-changes");
+function requestChangesUploadCurrent(event) {
+  updateUploadStatus("request-changes", event);
+}
+
+function bindUploadDetailActions() {
+  const bindings = [
+    ["uploadFullscreenButton", openUploadImageFullscreen],
+    ["uploadReviewActionsButton", openUploadReviewActions],
+    ["uploadFullscreenClose", closeUploadImageFullscreen],
+    ["uploadReviewActionsClose", closeUploadReviewActions],
+    ["uploadRejectButton", rejectUploadCurrent],
+    ["uploadRequestChangesButton", requestChangesUploadCurrent],
+    ["uploadApproveButton", approveUploadCurrent],
+  ];
+
+  bindings.forEach(([id, handler]) => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.type = "button";
+    button.onclick = handler;
+  });
 }
 
 function setUploadSareeActive(active) {
@@ -851,5 +949,20 @@ document.addEventListener("DOMContentLoaded", () => {
   populateUploadCategories();
   const form = document.getElementById("uploadSareeForm");
   if (form) form.addEventListener("submit", submitUploadSaree);
+  bindUploadDetailActions();
   enhanceUploadFileInputs();
 });
+
+window.openUploadImageFullscreen = openUploadImageFullscreen;
+window.closeUploadImageFullscreen = closeUploadImageFullscreen;
+window.openUploadReviewActions = openUploadReviewActions;
+window.closeUploadReviewActions = closeUploadReviewActions;
+window.handleUploadFullscreenBackdrop = handleUploadFullscreenBackdrop;
+window.handleUploadReviewActionsBackdrop = handleUploadReviewActionsBackdrop;
+window.approveUploadCurrent = approveUploadCurrent;
+window.rejectUploadCurrent = rejectUploadCurrent;
+window.requestChangesUploadCurrent = requestChangesUploadCurrent;
+window.approveUploadSaree = approveUploadSaree;
+window.rejectUploadSaree = rejectUploadSaree;
+window.requestUploadChanges = requestUploadChanges;
+window.approveUploadSareeFromCard = approveUploadSareeFromCard;
