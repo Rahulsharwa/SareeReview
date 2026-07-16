@@ -4,15 +4,22 @@ import dotenv from "dotenv";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
+import os from "os";
+import { readFile, unlink } from "fs/promises";
+import { Readable } from "stream";
 import { fileURLToPath } from "url";
 import { Redis } from "@upstash/redis";
 import { createClient } from "redis";
+import rateLimit from "express-rate-limit";
+import { del as deleteBlob, get as getBlob, head as headBlob } from "@vercel/blob";
+import { handleUpload } from "@vercel/blob/client";
 
 dotenv.config();
 dotenv.config({ path: ".env.upload" });
 
 const app = express();
 const PORT = process.env.PORT || 3003;
+app.set("trust proxy", 1);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,11 +51,26 @@ const SOCIAL_AUTH_COOKIE = "jsh_social_review";
 const UPLOAD_BASEROW_API_URL = process.env.UPLOAD_BASEROW_API_URL || BASEROW_BASE_URL;
 const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
 const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
-const UPLOAD_MAX_FILE_SIZE_MB = Number(process.env.UPLOAD_MAX_FILE_SIZE_MB || 10);
-const UPLOAD_MAX_FILE_SIZE_BYTES = UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024;
-const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:v1`;
+const MAX_UPLOAD_SIZE_MB = Math.max(1, Math.min(Number(process.env.MAX_UPLOAD_SIZE_MB || 50), 50));
+const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+const UPLOAD_MAX_FILES = Math.max(1, Math.min(Number(process.env.UPLOAD_MAX_FILES || 2), 2));
+const UPLOAD_CLIENT_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.UPLOAD_CLIENT_TIMEOUT_MS || 900000), 1800000));
+const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_ENABLED || "").toLowerCase() === "true";
+const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
+const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
+const UPLOAD_BLOB_ACCESS = "private";
+const UPLOAD_SAREE_CACHE_VERSION = "v3";
+const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
+const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
+const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
 const UPLOAD_RECENT_CACHE_TTL_SECONDS = 60;
-const UPLOAD_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const UPLOAD_IMAGE_MIME_TYPES = new Set(
+  String(process.env.UPLOAD_ALLOWED_MIME_TYPES || "image/jpeg,image/jpg,image/png,image/webp")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
+const UPLOAD_ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const UPLOAD_FIELDS = {
   productTitle: process.env.UPLOAD_FIELD_PRODUCT_TITLE || "9535465",
   productCode: process.env.UPLOAD_FIELD_PRODUCT_CODE || "9535466",
@@ -555,15 +577,44 @@ SAREE_TABLES.forEach((table) => {
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use((error, req, res, next) => {
+  if (error instanceof SyntaxError && "body" in error) {
+    return res.status(400).json({ ok: false, code: "INVALID_JSON", message: "Invalid JSON request body." });
+  }
+  return next(error);
+});
 
 const uploadSareeMulter = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: UPLOAD_MAX_FILE_SIZE_BYTES, files: 2 },
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (req, file, cb) => {
+      const extension = extensionForMimeType(file.mimetype) || path.extname(file.originalname || "").toLowerCase();
+      cb(null, `upload-saree-${crypto.randomUUID()}${extension}`);
+    },
+  }),
+  limits: {
+    fileSize: MAX_UPLOAD_SIZE_BYTES,
+    files: UPLOAD_MAX_FILES,
+    fields: 10,
+    parts: 12,
+  },
   fileFilter: (req, file, cb) => {
-    if (!UPLOAD_IMAGE_MIME_TYPES.has(file.mimetype)) {
+    if (!UPLOAD_IMAGE_MIME_TYPES.has(String(file.mimetype || "").toLowerCase())) {
       return cb(new Error("Only JPG, PNG, and WEBP image uploads are allowed."));
     }
     return cb(null, true);
+  },
+});
+
+const uploadRateLimit = rateLimit({
+  windowMs: Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    code: "UPLOAD_RATE_LIMITED",
+    message: "Too many upload attempts. Please wait and try again.",
   },
 });
 
@@ -1728,15 +1779,28 @@ function uploadStatusPayload(status, feedback = "") {
 function getUploadConfigStatus() {
   const required = ["UPLOAD_BASEROW_TOKEN", "UPLOAD_BASEROW_TABLE_ID"];
   const missing = required.filter((key) => !process.env[key] && !(key === "UPLOAD_BASEROW_TABLE_ID" && UPLOAD_BASEROW_TABLE_ID));
+  if (UPLOAD_DIRECT_STORAGE_ENABLED && !UPLOAD_BLOB_CONFIGURED) {
+    missing.push("BLOB_READ_WRITE_TOKEN or VERCEL_OIDC_TOKEN");
+  }
   const fieldValues = Object.values(UPLOAD_FIELDS);
   const fieldsConfigured = fieldValues.every((value) => /^\d+$/.test(String(value || "")));
+  const ok = missing.length === 0 && fieldsConfigured;
   return {
-    ok: missing.length === 0 && fieldsConfigured,
-    configured: missing.length === 0,
+    ok,
+    configured: ok,
     tableId: Number(UPLOAD_BASEROW_TABLE_ID),
     fieldsConfigured,
     missing,
-    maxFileSizeMb: UPLOAD_MAX_FILE_SIZE_MB,
+    maxFileSizeMb: MAX_UPLOAD_SIZE_MB,
+    maxUploadSizeMb: MAX_UPLOAD_SIZE_MB,
+    maxFiles: UPLOAD_MAX_FILES,
+    allowedMimeTypes: Array.from(UPLOAD_IMAGE_MIME_TYPES),
+    directStorageEnabled: UPLOAD_DIRECT_STORAGE_ENABLED,
+    blobConfigured: UPLOAD_BLOB_CONFIGURED,
+    clientTimeoutMs: UPLOAD_CLIENT_TIMEOUT_MS,
+    ...(!UPLOAD_BLOB_CONFIGURED && UPLOAD_DIRECT_STORAGE_ENABLED
+      ? { message: "Direct upload storage is not configured." }
+      : {}),
   };
 }
 
@@ -1746,6 +1810,114 @@ function assertUploadConfig() {
     error.status = 500;
     throw error;
   }
+}
+
+function extensionForMimeType(mimeType) {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return ".jpg";
+  if (normalized === "image/png") return ".png";
+  if (normalized === "image/webp") return ".webp";
+  return "";
+}
+
+function hasValidUploadFilename(filename) {
+  const value = String(filename || "").trim();
+  if (!value || value.includes("/") || value.includes("\\") || value.includes("..")) return false;
+  return UPLOAD_ALLOWED_EXTENSIONS.has(path.extname(value).toLowerCase());
+}
+
+function validateUploadBlobPathname(pathname, role = "") {
+  const value = String(pathname || "").trim();
+  const safeRole = role === "blouse" ? "blouse" : role === "saree" ? "saree" : "";
+  if (!value || value.includes("..") || value.includes("\\") || value.startsWith("/")) return "";
+  if (!value.startsWith(`${UPLOAD_BLOB_PREFIX}/`)) return "";
+  if (safeRole && !value.includes(`/${safeRole}/`)) return "";
+  return value;
+}
+
+function normalizeUploadStatus(value) {
+  if (!value) return "";
+  if (typeof value === "object" && value.value) return String(value.value).trim().toLowerCase();
+  return String(value).trim().toLowerCase();
+}
+
+function isHiddenUploadStatus(value) {
+  return ["failed", "reject", "rejected"].includes(normalizeUploadStatus(value));
+}
+
+function validateUploadFileDescriptor(file, role) {
+  const normalizedMime = String(file?.contentType || file?.mimeType || "").trim().toLowerCase();
+  const numericSize = Number(file?.size || 0);
+  const pathname = validateUploadBlobPathname(file?.pathname, role);
+  if (!pathname) {
+    const error = new Error("Invalid upload storage path.");
+    error.status = 400;
+    throw error;
+  }
+  if (!UPLOAD_IMAGE_MIME_TYPES.has(normalizedMime)) {
+    const error = new Error("Only JPG, PNG, and WEBP images are allowed.");
+    error.status = 415;
+    throw error;
+  }
+  if (!Number.isFinite(numericSize) || numericSize <= 0 || numericSize > MAX_UPLOAD_SIZE_BYTES) {
+    const error = new Error(`The selected image exceeds the maximum allowed size of ${MAX_UPLOAD_SIZE_MB} MB.`);
+    error.status = numericSize > MAX_UPLOAD_SIZE_BYTES ? 413 : 400;
+    throw error;
+  }
+  let sourceUrl;
+  try {
+    sourceUrl = new URL(String(file?.url || ""));
+  } catch {
+    sourceUrl = null;
+  }
+  if (!sourceUrl || sourceUrl.protocol !== "https:" || !sourceUrl.hostname.endsWith(".blob.vercel-storage.com")) {
+    const error = new Error("Invalid upload storage URL.");
+    error.status = 400;
+    throw error;
+  }
+  return { pathname, url: sourceUrl.toString(), mimeType: normalizedMime, size: numericSize };
+}
+
+async function uploadBaserowFileFromBlob(pathname, blobInfo) {
+  const result = await getBlob(pathname, { access: UPLOAD_BLOB_ACCESS, useCache: false });
+  if (result.statusCode !== 200 || !result.stream) {
+    const error = new Error("Unable to read the staged upload.");
+    error.status = 502;
+    throw error;
+  }
+
+  const boundary = `jsh-${crypto.randomUUID()}`;
+  const filename = path.basename(blobInfo.pathname).replace(/[^a-zA-Z0-9._-]/g, "_") || "upload-image";
+  const header = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${blobInfo.contentType}\r\n\r\n`,
+  );
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const body = Readable.from((async function* streamMultipartBody() {
+    yield header;
+    for await (const chunk of Readable.fromWeb(result.stream)) yield chunk;
+    yield footer;
+  })());
+
+  return uploadBaserowFetch("/api/user-files/upload-file/", {
+    method: "POST",
+    body,
+    duplex: "half",
+    signal: AbortSignal.timeout(10 * 60 * 1000),
+    headers: {
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "Content-Length": String(header.length + blobInfo.size + footer.length),
+    },
+  });
+}
+
+async function cleanupUploadBlobPathnames(pathnames) {
+  const validPathnames = [...new Set((Array.isArray(pathnames) ? pathnames : [])
+    .map((pathname) => validateUploadBlobPathname(pathname))
+    .filter(Boolean))]
+    .slice(0, UPLOAD_MAX_FILES);
+  if (!validPathnames.length) return { deleted: 0 };
+  await deleteBlob(validPathnames);
+  return { deleted: validPathnames.length };
 }
 
 async function uploadBaserowFetch(pathname, options = {}) {
@@ -1777,7 +1949,8 @@ async function uploadBaserowFetch(pathname, options = {}) {
 
 async function uploadBaserowFile(file) {
   const form = new FormData();
-  const blob = new Blob([file.buffer], { type: file.mimetype });
+  const buffer = await readFile(file.path);
+  const blob = new Blob([buffer], { type: file.mimetype });
   form.append("file", blob, file.originalname || "upload-image");
   return uploadBaserowFetch("/api/user-files/upload-file/", {
     method: "POST",
@@ -1851,20 +2024,44 @@ async function fetchRecentUploadSarees({ refresh = false } = {}) {
     size: "50",
   });
   const data = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`);
-  const rows = Array.isArray(data.results)
-    ? data.results.sort((a, b) => Number(b.id || 0) - Number(a.id || 0)).map(normalizeUploadRow)
+  const rawRows = Array.isArray(data.results) ? data.results : [];
+  const visibleRows = rawRows.filter((row) => !isHiddenUploadStatus(readUploadField(row, "generationStatus")));
+  const rows = visibleRows.length
+    ? visibleRows
+      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+      .map(normalizeUploadRow)
     : [];
   const payload = {
     ok: true,
     rows,
+    totalFetched: rawRows.length,
+    hiddenFailed: rawRows.length - visibleRows.length,
+    visibleCount: rows.length,
     cache: { provider: cacheProvider(), ttlSeconds: UPLOAD_RECENT_CACHE_TTL_SECONDS, status: "miss" },
   };
   await cacheSet(UPLOAD_RECENT_CACHE_KEY, payload, UPLOAD_RECENT_CACHE_TTL_SECONDS);
   return payload;
 }
 
+function buildUploadCreatePayload({ productTitle, productCode, category, price, commentNotes, sareeUploadedFile, blouseUploadedFile = null }) {
+  const payload = {
+    [uploadFieldKey("sareeImage")]: [sareeUploadedFile],
+    [uploadFieldKey("generationStatus")]: UPLOAD_GENERATION_STATUS.start,
+  };
+
+  if (blouseUploadedFile) payload[uploadFieldKey("blouseImage")] = [blouseUploadedFile];
+  appendOptionalUploadField(payload, "productTitle", productTitle);
+  appendOptionalUploadField(payload, "productCode", productCode);
+  appendOptionalUploadField(payload, "category", category);
+  appendOptionalUploadField(payload, "price", price);
+  appendOptionalUploadField(payload, "commentNotes", commentNotes);
+  return payload;
+}
+
 async function clearUploadCache() {
   await cacheDelete(UPLOAD_RECENT_CACHE_KEY);
+  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V2);
+  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V1);
 }
 
 async function patchUploadSareeStatus(rowId, status, feedback = "") {
@@ -2584,7 +2781,177 @@ app.get("/api/upload-saree/recent", requireSocialReviewAuth, async (req, res) =>
   }
 });
 
+app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
+  try {
+    if (!UPLOAD_DIRECT_STORAGE_ENABLED) {
+      return res.status(400).json({ ok: false, code: "DIRECT_UPLOAD_DISABLED", message: "Direct storage upload is disabled." });
+    }
+    if (!UPLOAD_BLOB_CONFIGURED) {
+      return res.status(503).json({
+        ok: false,
+        code: "BLOB_STORAGE_NOT_CONFIGURED",
+        message: "Large-image storage is not configured on the server. Upload is temporarily unavailable.",
+      });
+    }
+
+    const result = await handleUpload({
+      request: req,
+      body: req.body,
+      onBeforeGenerateToken: async (pathname, clientPayload) => {
+        let metadata;
+        try {
+          metadata = JSON.parse(clientPayload || "{}");
+        } catch {
+          const error = new Error("Invalid upload metadata.");
+          error.status = 400;
+          throw error;
+        }
+
+        const role = metadata?.role;
+        const mimeType = String(metadata?.mimeType || "").trim().toLowerCase();
+        const declaredSize = Number(metadata?.declaredSize || 0);
+        if (role !== "saree" && role !== "blouse") {
+          const error = new Error("Invalid image role.");
+          error.status = 400;
+          throw error;
+        }
+        if (!validateUploadBlobPathname(pathname, role)) {
+          const error = new Error("Invalid upload storage path.");
+          error.status = 400;
+          throw error;
+        }
+        if (!hasValidUploadFilename(metadata?.originalFilename) || !UPLOAD_IMAGE_MIME_TYPES.has(mimeType)) {
+          const error = new Error("Only JPG, PNG, and WEBP images are allowed.");
+          error.status = 415;
+          throw error;
+        }
+        if (!Number.isFinite(declaredSize) || declaredSize <= 0 || declaredSize > MAX_UPLOAD_SIZE_BYTES) {
+          const error = new Error(`The selected image exceeds the maximum allowed size of ${MAX_UPLOAD_SIZE_MB} MB.`);
+          error.status = declaredSize > MAX_UPLOAD_SIZE_BYTES ? 413 : 400;
+          throw error;
+        }
+
+        return {
+          allowedContentTypes: ["image/jpeg", "image/png", "image/webp"],
+          maximumSizeInBytes: MAX_UPLOAD_SIZE_BYTES,
+          addRandomSuffix: true,
+          allowOverwrite: false,
+          tokenPayload: JSON.stringify({ role, declaredSize, mimeType }),
+        };
+      },
+    });
+    res.json(result);
+  } catch (error) {
+    const status = Number(error.status || error.statusCode || 500);
+    console.warn("Blob client upload request failed", { status, message: error.message });
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      ok: false,
+      code: "BLOB_UPLOAD_REQUEST_FAILED",
+      message: status >= 400 && status < 500 ? error.message : "Unable to prepare the image upload.",
+    });
+  }
+});
+
+app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
+  const stagedPathnames = [];
+  try {
+    const files = req.body?.files || {};
+    const fileEntries = Object.entries(files).filter(([, value]) => value);
+    if (!files.saree) {
+      return res.status(400).json({ ok: false, code: "SAREE_IMAGE_REQUIRED", message: "Please upload Saree Image." });
+    }
+    if (fileEntries.length > UPLOAD_MAX_FILES) {
+      return res.status(400).json({ ok: false, code: "TOO_MANY_FILES", message: "Maximum two images are allowed per upload." });
+    }
+
+    const verifiedFiles = {};
+    for (const role of ["saree", "blouse"]) {
+      if (!files[role]) continue;
+      const descriptor = validateUploadFileDescriptor(files[role], role);
+      stagedPathnames.push(descriptor.pathname);
+      const blobInfo = await headBlob(descriptor.pathname);
+      if (blobInfo.pathname !== descriptor.pathname || blobInfo.url !== descriptor.url) {
+        const error = new Error("Upload storage metadata did not match.");
+        error.status = 400;
+        throw error;
+      }
+      const blobMime = String(blobInfo.contentType || "").trim().toLowerCase();
+      if (!UPLOAD_IMAGE_MIME_TYPES.has(blobMime)) {
+        const error = new Error("Only JPG, PNG, and WEBP images are allowed.");
+        error.status = 415;
+        throw error;
+      }
+      if (!Number.isFinite(blobInfo.size) || blobInfo.size <= 0 || blobInfo.size > MAX_UPLOAD_SIZE_BYTES) {
+        const error = new Error(`The selected image exceeds the maximum allowed size of ${MAX_UPLOAD_SIZE_MB} MB.`);
+        error.status = blobInfo.size > MAX_UPLOAD_SIZE_BYTES ? 413 : 400;
+        throw error;
+      }
+      verifiedFiles[role] = await uploadBaserowFileFromBlob(descriptor.pathname, blobInfo);
+    }
+
+    const payload = buildUploadCreatePayload({
+      productTitle: req.body?.productTitle,
+      productCode: req.body?.productCode,
+      category: req.body?.category,
+      price: req.body?.price,
+      commentNotes: req.body?.commentNotes,
+      sareeUploadedFile: verifiedFiles.saree,
+      blouseUploadedFile: verifiedFiles.blouse || null,
+    });
+
+    const created = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?user_field_names=false`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    await clearUploadCache();
+    try {
+      await cleanupUploadBlobPathnames(stagedPathnames);
+    } catch (cleanupError) {
+      console.warn("Upload staging cleanup failed", { pathnames: stagedPathnames, message: cleanupError.message });
+    }
+    res.json({ ok: true, row: normalizeUploadRow(created) });
+  } catch (error) {
+    try {
+      await cleanupUploadBlobPathnames(stagedPathnames);
+    } catch (cleanupError) {
+      console.warn("Upload staging cleanup failed", { pathnames: stagedPathnames, message: cleanupError.message });
+    }
+    const isBaserowSizeError = error.status === 413;
+    console.error("Upload finalize failed", { status: error.status, message: error.message });
+    res.status(error.status || 500).json({
+      ok: false,
+      code: isBaserowSizeError ? "BASEROW_FILE_TOO_LARGE" : "UPLOAD_FINALIZE_FAILED",
+      message: isBaserowSizeError
+        ? "Baserow rejected the image because it exceeds the file limit configured for this Baserow account."
+        : error.message === "Upload Baserow token is not configured."
+          ? error.message
+          : "Unable to save uploaded images.",
+    });
+  }
+});
+
+app.post("/api/upload-saree/cleanup-upload", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const pathnames = Array.isArray(req.body?.pathnames) ? req.body.pathnames : [];
+    if (pathnames.length > UPLOAD_MAX_FILES) {
+      return res.status(400).json({ ok: false, code: "TOO_MANY_PATHS", message: "Maximum two upload paths can be cleaned at once." });
+    }
+    const result = await cleanupUploadBlobPathnames(pathnames);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.warn("Upload cleanup failed", { message: error.message });
+    res.status(500).json({ ok: false, code: "UPLOAD_CLEANUP_FAILED", message: "Unable to clean temporary upload files." });
+  }
+});
+
 app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(409).json({
+      ok: false,
+      code: "LEGACY_UPLOAD_DISABLED",
+      message: "This image was sent through the legacy server upload route. Direct large-image upload is not active.",
+    });
+  }
   uploadSareeMulter.fields([
     { name: "sareeImage", maxCount: 1 },
     { name: "blouseImage", maxCount: 1 },
@@ -2592,7 +2959,7 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
     try {
       if (uploadError) {
         const message = uploadError.code === "LIMIT_FILE_SIZE"
-          ? `Each image must be ${UPLOAD_MAX_FILE_SIZE_MB}MB or smaller.`
+          ? `Each image must be ${MAX_UPLOAD_SIZE_MB}MB or smaller.`
           : uploadError.message;
         return res.status(400).json({ ok: false, error: message });
       }
@@ -2606,17 +2973,15 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
       const sareeUploadedFile = await uploadBaserowFile(sareeImage);
       const blouseUploadedFile = blouseImage ? await uploadBaserowFile(blouseImage) : null;
 
-      const payload = {
-        [uploadFieldKey("sareeImage")]: [sareeUploadedFile],
-        [uploadFieldKey("generationStatus")]: UPLOAD_GENERATION_STATUS.start,
-      };
-
-      if (blouseUploadedFile) payload[uploadFieldKey("blouseImage")] = [blouseUploadedFile];
-      appendOptionalUploadField(payload, "productTitle", req.body?.productTitle);
-      appendOptionalUploadField(payload, "productCode", req.body?.productCode);
-      appendOptionalUploadField(payload, "category", req.body?.category);
-      appendOptionalUploadField(payload, "price", req.body?.price);
-      appendOptionalUploadField(payload, "commentNotes", req.body?.commentNotes);
+      const payload = buildUploadCreatePayload({
+        productTitle: req.body?.productTitle,
+        productCode: req.body?.productCode,
+        category: req.body?.category,
+        price: req.body?.price,
+        commentNotes: req.body?.commentNotes,
+        sareeUploadedFile,
+        blouseUploadedFile,
+      });
 
       const created = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?user_field_names=false`, {
         method: "POST",
@@ -2629,6 +2994,12 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
         ok: false,
         error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to upload saree assets.",
       });
+    } finally {
+      const uploadedFiles = [
+        ...(req.files?.sareeImage || []),
+        ...(req.files?.blouseImage || []),
+      ];
+      await Promise.all(uploadedFiles.map((file) => file?.path ? unlink(file.path).catch(() => {}) : null));
     }
   });
 });
@@ -2636,7 +3007,7 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
 app.patch("/api/upload-saree/:rowId/approve", requireSocialReviewAuth, async (req, res) => {
   try {
     const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.approved);
-    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.approved, row });
+    res.json({ ok: true, rowId: Number(req.params.rowId), status: UPLOAD_GENERATION_STATUS.approved, hiddenFromDashboard: false, row });
   } catch (error) {
     res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to approve uploaded saree." });
   }
@@ -2646,7 +3017,7 @@ app.patch("/api/upload-saree/:rowId/reject", requireSocialReviewAuth, async (req
   try {
     const feedback = String(req.body?.feedback || req.body?.comment || req.body?.note || "").trim();
     const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
-    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
+    res.json({ ok: true, rowId: Number(req.params.rowId), status: UPLOAD_GENERATION_STATUS.failed, hiddenFromDashboard: true, row });
   } catch (error) {
     res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to reject uploaded saree." });
   }
@@ -2656,7 +3027,7 @@ app.patch("/api/upload-saree/:rowId/request-changes", requireSocialReviewAuth, a
   try {
     const feedback = String(req.body?.feedback || req.body?.comment || req.body?.note || "").trim();
     const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.failed, feedback);
-    res.json({ ok: true, status: UPLOAD_GENERATION_STATUS.failed, row });
+    res.json({ ok: true, rowId: Number(req.params.rowId), status: UPLOAD_GENERATION_STATUS.failed, hiddenFromDashboard: true, row });
   } catch (error) {
     res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to request changes for uploaded saree." });
   }

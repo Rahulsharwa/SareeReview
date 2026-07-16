@@ -2,8 +2,12 @@ const UPLOAD_API = {
   status: "/api/upload-saree/status",
   recent: "/api/upload-saree/recent",
   upload: "/api/upload-saree",
+  finalize: "/api/upload-saree/finalize",
+  cleanupUpload: "/api/upload-saree/cleanup-upload",
   reviewAuth: "/api/review-auth",
 };
+
+window.JSH_UPLOAD_BUILD = "blob-client-upload-v3";
 
 const uploadSareeState = {
   active: false,
@@ -22,7 +26,23 @@ const uploadSareeState = {
   currentDetailSignature: "",
   detailLastScrollTop: 0,
   detailHeaderHidden: false,
+  directStorageEnabled: false,
+  publicConfig: {},
+  clientTimeoutMs: 900000,
+  allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png", "image/webp"],
+  isUploading: false,
+  uploadCancelled: false,
+  uploadTimedOut: false,
+  uploadAbortController: null,
+  uploadedBlobPaths: [],
+  fileProgress: {
+    saree: 0,
+    blouse: 0,
+  },
 };
+
+const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 
 const UPLOAD_GENERATED_TABS = [
   { key: "front", label: "Front View" },
@@ -226,7 +246,20 @@ async function uploadApiCall(url, options = {}, retryAuth = true) {
     return uploadApiCall(url, options, false);
   }
 
-  if (!response.ok) throw new Error(data.error || data.message || `API failed: ${response.status}`);
+  if (!response.ok) {
+    console.error("Upload failed", {
+      route: url === UPLOAD_API.upload ? "/api/upload-saree" : url,
+      status: response.status,
+      directStorageEnabled: uploadSareeState.publicConfig?.directStorageEnabled,
+    });
+    if (response.status === 413 && url === UPLOAD_API.upload) {
+      throw new Error("This image was sent through the legacy server upload route. Direct large-image upload is not active.");
+    }
+    if (response.status === 413) {
+      throw new Error("The upload was rejected because the request was too large. The direct storage upload is not active or the hosting upload limit was reached.");
+    }
+    throw new Error(data.error || data.message || `API failed: ${response.status}`);
+  }
   return data;
 }
 
@@ -239,7 +272,7 @@ function uploadStatusClass(status) {
 }
 
 function currentUploadRow() {
-  return uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
+  return uploadSareeState.rows.filter(isVisibleUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
 }
 
 function setUploadMessage(message, isError = false) {
@@ -249,12 +282,115 @@ function setUploadMessage(message, isError = false) {
   el.style.color = isError ? "#b42318" : "#047857";
 }
 
+function getMaxUploadSizeBytes() {
+  return uploadSareeState.maxFileSizeMb * 1024 * 1024;
+}
+
+function getFileExtension(filename) {
+  return String(filename || "").split(".").pop().toLowerCase();
+}
+
+function validateUploadImageFile(file, label) {
+  if (!file) return;
+  const mimeType = String(file.type || "").toLowerCase();
+  if (!ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)) {
+    throw new Error(`${label} must be a JPG, PNG, or WEBP image.`);
+  }
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(getFileExtension(file.name))) {
+    throw new Error(`${label} must use a .jpg, .jpeg, .png, or .webp extension.`);
+  }
+  if (file.size > getMaxUploadSizeBytes()) {
+    throw new Error(`The selected image exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
+  }
+  if (file.size <= 0) {
+    throw new Error(`${label} is empty.`);
+  }
+}
+
+function showUploadProgress(text, percentage = 0) {
+  const root = document.getElementById("uploadSareeProgress");
+  const textEl = document.getElementById("uploadProgressText");
+  const percentEl = document.getElementById("uploadProgressPercent");
+  const bar = document.getElementById("uploadProgressBar");
+  const safePercent = Math.max(0, Math.min(Math.round(Number(percentage) || 0), 100));
+  if (root) root.hidden = false;
+  if (textEl) textEl.textContent = text;
+  if (percentEl) percentEl.textContent = `${safePercent}%`;
+  if (bar) bar.value = safePercent;
+  setUploadMessage(text);
+}
+
+function hideUploadProgressAfterDelay() {
+  setTimeout(() => {
+    if (uploadSareeState.isUploading) return;
+    const root = document.getElementById("uploadSareeProgress");
+    if (root) root.hidden = true;
+  }, 900);
+}
+
+function calculateTotalUploadProgress(files, progress) {
+  const entries = [
+    { role: "saree", file: files.saree },
+    { role: "blouse", file: files.blouse },
+  ].filter((entry) => entry.file);
+  const totalBytes = entries.reduce((sum, entry) => sum + entry.file.size, 0);
+  if (!totalBytes) return 0;
+  const uploadedBytes = entries.reduce((sum, entry) => sum + (entry.file.size * (progress[entry.role] || 0)) / 100, 0);
+  return Math.round((uploadedBytes / totalBytes) * 100);
+}
+
+function setUploadControlsDisabled(disabled) {
+  const form = document.getElementById("uploadSareeForm");
+  if (!form) return;
+  form.querySelectorAll("input, textarea, select, button").forEach((control) => {
+    if (control.id === "uploadCancelButton") {
+      control.disabled = !disabled;
+      return;
+    }
+    control.disabled = Boolean(disabled);
+  });
+}
+
+function getUploadInputValue(form, name) {
+  return String(form?.elements?.[name]?.value || "").trim();
+}
+
+async function cleanupUploadedBlobPaths(pathnames) {
+  const validPathnames = Array.isArray(pathnames) ? pathnames.filter(Boolean) : [];
+  if (!validPathnames.length) return;
+  try {
+    await uploadApiCall(UPLOAD_API.cleanupUpload, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ pathnames: validPathnames }),
+    });
+  } catch (error) {
+    console.warn("Temporary upload cleanup failed:", error);
+  }
+}
+
+function cancelUploadSaree() {
+  if (!uploadSareeState.isUploading) return;
+  uploadSareeState.uploadCancelled = true;
+  uploadSareeState.uploadAbortController?.abort();
+}
+
+function isVisibleUploadRow(row) {
+  const rawStatus = row?.generationStatus || row?.status || "";
+  const status = rawStatus && typeof rawStatus === "object" && rawStatus.value ? rawStatus.value : rawStatus;
+  return !["failed", "reject", "rejected"].includes(String(status).trim().toLowerCase());
+}
+
 async function loadUploadStatus() {
   const panel = document.getElementById("uploadStatusPanel");
   try {
     const data = await uploadApiCall(UPLOAD_API.status);
-    uploadSareeState.maxFileSizeMb = Number(data.maxFileSizeMb || 10);
-    document.getElementById("uploadMaxSizeText").textContent = `JPG, PNG, WEBP - Max ${uploadSareeState.maxFileSizeMb}MB`;
+    uploadSareeState.publicConfig = data || {};
+    uploadSareeState.maxFileSizeMb = Number(data.maxUploadSizeMb || data.maxFileSizeMb || 50);
+    uploadSareeState.directStorageEnabled = Boolean(data.directStorageEnabled);
+    uploadSareeState.clientTimeoutMs = Number(data.clientTimeoutMs || 900000);
+    if (Array.isArray(data.allowedMimeTypes)) uploadSareeState.allowedMimeTypes = data.allowedMimeTypes;
+    document.getElementById("uploadMaxSizeText").textContent = `JPG, PNG, WEBP - Max ${uploadSareeState.maxFileSizeMb} MB per image`;
     panel.className = `upload-status ${data.ok ? "ok" : "error"}`;
     panel.textContent = data.ok
       ? `Upload backend connected - Table ${data.tableId}`
@@ -299,11 +435,12 @@ async function loadRecentUploadSarees(options = {}) {
     }
     if (!response.ok) throw new Error(data.error || data.message || "Unable to load uploaded sarees.");
 
-    const nextRows = Array.isArray(data.rows)
+    const rawRows = Array.isArray(data.rows)
       ? data.rows
       : Array.isArray(data.uploads)
         ? data.uploads
         : [];
+    const nextRows = rawRows.filter(isVisibleUploadRow);
 
     const nextSignature = stableUploadRowsSignature(nextRows);
     if (uploadSareeState.lastRowsSignature !== nextSignature) {
@@ -346,14 +483,15 @@ async function syncUploadSareesNow() {
 function renderUploadRows() {
   const root = document.getElementById("uploadRecentRows");
   const count = document.getElementById("uploadRecentCount");
-  count.textContent = `${uploadSareeState.rows.length} rows`;
+  const visibleRows = uploadSareeState.rows.filter(isVisibleUploadRow);
+  count.textContent = `${visibleRows.length} rows`;
 
-  if (!uploadSareeState.rows.length) {
+  if (!visibleRows.length) {
     root.innerHTML = `<div class="upload-empty">No uploaded sarees found.</div>`;
     return;
   }
 
-  root.innerHTML = uploadSareeState.rows.map((row) => {
+  root.innerHTML = visibleRows.map((row) => {
     const status = uploadStatusText(row);
     const statusClass = uploadStatusClass(status);
     const approveDisabled = uploadIsPending(row) ? "" : "disabled";
@@ -620,25 +758,65 @@ function selectUploadGeneratedLegacy(key) {
   renderUploadDetail();
 }
 
+function isRunningOnVercelProduction() {
+  return (
+    window.location.hostname.endsWith(".vercel.app") ||
+    window.location.hostname === "saree-review.vercel.app"
+  );
+}
+
 async function submitUploadSaree(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const sareeFile = form.elements.sareeImage.files[0];
-  if (!sareeFile) {
-    setUploadMessage("Please upload Saree Image.", true);
+  if (uploadSareeState.isUploading) return;
+
+  const config = uploadSareeState.publicConfig || {};
+  if (isRunningOnVercelProduction() && (!config.directStorageEnabled || !config.blobConfigured)) {
+    showUploadToast("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
+    setUploadMessage("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
     return;
   }
 
+  if (config.directStorageEnabled) {
+    return submitUploadSareeDirect(form);
+  }
+
+  return submitUploadSareeLegacy(form);
+}
+
+async function submitUploadSareeLegacy(form) {
+  const sareeFile = form.elements.sareeImage.files[0];
+  const blouseFile = form.elements.blouseImage.files[0] || null;
   const submitBtn = document.getElementById("uploadSubmitBtn");
-  submitBtn.disabled = true;
-  uploadSareeState.submitting = true;
-  setUploadMessage("Uploading...");
+
+  if (isRunningOnVercelProduction() && sareeFile && sareeFile.size > 4 * 1024 * 1024) {
+    showUploadToast("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
+    setUploadMessage("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
+    return;
+  }
 
   try {
+    if (!sareeFile) {
+      throw new Error("Please upload Saree Image.");
+    }
+    showUploadProgress("Validating images...", 0);
+    validateUploadImageFile(sareeFile, "Saree Image");
+    if (blouseFile) validateUploadImageFile(blouseFile, "Blouse Image");
+    uploadSareeState.isUploading = true;
+    uploadSareeState.uploadCancelled = false;
+    uploadSareeState.uploadTimedOut = false;
+    uploadSareeState.uploadAbortController = new AbortController();
+    uploadSareeState.uploadedBlobPaths = [];
+    uploadSareeState.fileProgress = { saree: 0, blouse: 0 };
+    uploadSareeState.submitting = true;
+    setUploadControlsDisabled(true);
+    setUploadMessage("Uploading...");
     await uploadApiCall(UPLOAD_API.upload, {
       method: "POST",
       body: new FormData(form),
     });
+
+    showUploadProgress("Upload complete", 100);
     form.reset();
     clearUploadFilePreviews();
     setUploadMessage("Uploaded successfully. Generation Status set to Start.");
@@ -646,11 +824,127 @@ async function submitUploadSaree(event) {
     await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
     updateUploadSyncTime();
   } catch (error) {
-    setUploadMessage(error.message, true);
-    showUploadToast(error.message, true);
+    if (error?.name === "AbortError") {
+      setUploadMessage("Upload cancelled.", true);
+      showUploadToast("Upload cancelled.", true);
+    } else {
+      setUploadMessage(error.message || "Upload failed.", true);
+      showUploadToast(error.message || "Upload failed.", true);
+    }
+    await cleanupUploadedBlobPaths(uploadSareeState.uploadedBlobPaths);
   } finally {
+    uploadSareeState.isUploading = false;
     uploadSareeState.submitting = false;
-    submitBtn.disabled = false;
+    uploadSareeState.uploadAbortController = null;
+    setUploadControlsDisabled(false);
+    if (submitBtn) submitBtn.disabled = false;
+    hideUploadProgressAfterDelay();
+  }
+}
+
+async function submitUploadSareeDirect(form) {
+  const sareeFile = form.elements.sareeImage.files[0];
+  const blouseFile = form.elements.blouseImage.files[0] || null;
+  const submitBtn = document.getElementById("uploadSubmitBtn");
+
+  try {
+    if (!sareeFile) {
+      throw new Error("Please upload Saree Image.");
+    }
+    showUploadProgress("Validating images...", 0);
+    validateUploadImageFile(sareeFile, "Saree Image");
+    if (blouseFile) validateUploadImageFile(blouseFile, "Blouse Image");
+
+    uploadSareeState.isUploading = true;
+    uploadSareeState.uploadCancelled = false;
+    uploadSareeState.uploadTimedOut = false;
+    uploadSareeState.uploadAbortController = new AbortController();
+    uploadSareeState.uploadedBlobPaths = [];
+    uploadSareeState.fileProgress = { saree: 0, blouse: 0 };
+    uploadSareeState.submitting = true;
+    setUploadControlsDisabled(true);
+
+    showUploadProgress("Preparing secure upload...", 0);
+    const uploaded = {};
+    for (const item of [
+      { role: "saree", file: sareeFile },
+      { role: "blouse", file: blouseFile },
+    ]) {
+      if (!item.file) continue;
+      if (uploadSareeState.uploadCancelled) {
+        throw new DOMException("Upload cancelled.", "AbortError");
+      }
+      if (typeof window.uploadSareeFileToBlob !== "function") {
+        throw new Error("Direct large-image upload is not active.");
+      }
+      const timeoutId = setTimeout(() => {
+        uploadSareeState.uploadTimedOut = true;
+        uploadSareeState.uploadAbortController?.abort();
+      }, uploadSareeState.clientTimeoutMs);
+      let blob;
+      try {
+        blob = await window.uploadSareeFileToBlob({
+          file: item.file,
+          role: item.role,
+          signal: uploadSareeState.uploadAbortController.signal,
+          onProgress: (progress) => {
+            uploadSareeState.fileProgress[item.role] = progress.percentage;
+            const totalPercent = calculateTotalUploadProgress({ saree: sareeFile, blouse: blouseFile }, uploadSareeState.fileProgress);
+            showUploadProgress(`Uploading ${item.role === "saree" ? "Saree Image" : "Blouse Image"}: ${progress.percentage}%`, totalPercent);
+          },
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      uploaded[item.role] = {
+        url: blob.url,
+        pathname: blob.pathname,
+        contentType: blob.contentType,
+        size: item.file.size,
+      };
+      uploadSareeState.uploadedBlobPaths.push(blob.pathname);
+    }
+
+    showUploadProgress("Saving to Baserow...", 96);
+    await uploadApiCall(UPLOAD_API.finalize, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        productTitle: getUploadInputValue(form, "productTitle"),
+        productCode: getUploadInputValue(form, "productCode"),
+        category: getUploadInputValue(form, "category"),
+        price: getUploadInputValue(form, "price"),
+        commentNotes: getUploadInputValue(form, "commentNotes"),
+        files: uploaded,
+      }),
+    });
+
+    showUploadProgress("Upload complete", 100);
+    form.reset();
+    clearUploadFilePreviews();
+    setUploadMessage("Uploaded successfully. Generation Status set to Start.");
+    showUploadToast("Uploaded successfully. Generation Status set to Start.");
+    await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+    updateUploadSyncTime();
+  } catch (error) {
+    if (uploadSareeState.uploadTimedOut) {
+      setUploadMessage("The upload timed out. Check your connection and try again.", true);
+      showUploadToast("The upload timed out. Check your connection and try again.", true);
+    } else if (error?.name === "AbortError" || uploadSareeState.uploadCancelled) {
+      setUploadMessage("Upload cancelled.", true);
+      showUploadToast("Upload cancelled.", true);
+    } else {
+      setUploadMessage(error.message || "Upload failed.", true);
+      showUploadToast(error.message || "Upload failed.", true);
+    }
+    await cleanupUploadedBlobPaths(uploadSareeState.uploadedBlobPaths);
+  } finally {
+    uploadSareeState.isUploading = false;
+    uploadSareeState.submitting = false;
+    uploadSareeState.uploadAbortController = null;
+    setUploadControlsDisabled(false);
+    if (submitBtn) submitBtn.disabled = false;
+    hideUploadProgressAfterDelay();
   }
 }
 
@@ -698,12 +992,21 @@ async function updateUploadStatus(action, event) {
       body: JSON.stringify({ feedback, comment: feedback, note: feedback }),
     });
     closeUploadReviewActions();
-    await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
-    const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
-    if (updatedRow) {
-      uploadSareeState.selectedRowId = updatedRow.rowId;
-      uploadSareeState.currentDetailSignature = getUploadDetailSignature(updatedRow);
-      renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
+    if (action === "reject" || action === "request-changes") {
+      closeUploadImageFullscreen();
+      closeUploadDetail();
+      uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(row.rowId));
+      uploadSareeState.lastRowsSignature = "";
+      renderUploadRows();
+      await loadRecentUploadSarees({ force: true, preserveDetail: false, silent: true });
+    } else {
+      await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+      const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
+      if (updatedRow) {
+        uploadSareeState.selectedRowId = updatedRow.rowId;
+        uploadSareeState.currentDetailSignature = getUploadDetailSignature(updatedRow);
+        renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
+      }
     }
     showUploadToast(action === "approve"
       ? "Approved successfully."
@@ -949,6 +1252,7 @@ document.addEventListener("DOMContentLoaded", () => {
   populateUploadCategories();
   const form = document.getElementById("uploadSareeForm");
   if (form) form.addEventListener("submit", submitUploadSaree);
+  document.getElementById("uploadCancelButton")?.addEventListener("click", cancelUploadSaree);
   bindUploadDetailActions();
   enhanceUploadFileInputs();
 });
@@ -966,3 +1270,5 @@ window.approveUploadSaree = approveUploadSaree;
 window.rejectUploadSaree = rejectUploadSaree;
 window.requestUploadChanges = requestUploadChanges;
 window.approveUploadSareeFromCard = approveUploadSareeFromCard;
+window.submitUploadSareeDirect = submitUploadSareeDirect;
+window.uploadState = uploadSareeState;

@@ -6,17 +6,24 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "build": "npm run build:upload-client",
+    "build:upload-client": "esbuild src/upload-saree-blob-client.js --bundle --platform=browser --format=iife --outfile=public/upload-saree-blob-client.bundle.js",
     "check:baserow": "node scripts/check-baserow-token.js"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",
+    "@vercel/blob": "^2.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
     "multer": "^2.2.0",
     "redis": "^6.0.1"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }
