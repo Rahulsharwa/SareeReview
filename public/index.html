@@ -1725,6 +1725,7 @@
         category: product.category || '',
         generationStatus: product.generationStatus || '',
         shopify: product.shopify || '',
+        shopifyNotes: product.shopifyNotes || product.shopifyStatus || '',
         title: product.title || '',
         code: product.code || '',
         price: product.price || '',
@@ -1759,6 +1760,7 @@
         rowId: product.rowId,
         generationStatus: product.generationStatus || '',
         shopify: product.shopify || '',
+        shopifyNotes: product.shopifyNotes || product.shopifyStatus || '',
         comment: product.comment || '',
         front: product.images?.front || '',
         side: product.images?.side || '',
@@ -1869,7 +1871,7 @@
         }
 
         const previousSelectedProductId = state.selectedProductId;
-        const nextProducts = Array.isArray(data.products) ? data.products : [];
+        const nextProducts = (Array.isArray(data.products) ? data.products : []).filter(shouldShowReviewProduct);
         const nextSignature = createSareeProductsSignature(nextProducts);
         const productsChanged = state.lastProductsSignature !== nextSignature;
         products = nextProducts;
@@ -2059,8 +2061,38 @@
       return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
     }
 
+    function normalizeReviewStatus(value) {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'object' && value.value !== undefined) {
+        return String(value.value).trim().toLowerCase();
+      }
+      if (typeof value === 'object' && value.name !== undefined) {
+        return String(value.name).trim().toLowerCase();
+      }
+      return String(value).trim().toLowerCase();
+    }
+
+    function shouldShowReviewProduct(product) {
+      const generationStatus = normalizeReviewStatus(
+        product?.generationStatus ??
+        product?.['Generation Status']
+      );
+      const shopifyNotes = normalizeReviewStatus(
+        product?.shopifyNotes ??
+        product?.shopifyStatus ??
+        product?.shopify ??
+        product?.['SHOPIFY Notes']
+      );
+      return generationStatus === 'approved' && shopifyNotes !== 'approved';
+    }
+
+    function visibleReviewProducts(sourceProducts = products) {
+      return (Array.isArray(sourceProducts) ? sourceProducts : []).filter(shouldShowReviewProduct);
+    }
+
     function currentProduct() {
-      return products.find(p => p.id === state.selectedProductId) || products[0] || null;
+      const visibleProducts = visibleReviewProducts();
+      return visibleProducts.find(p => p.id === state.selectedProductId) || visibleProducts[0] || null;
     }
 
     function escapeJs(value) {
@@ -2093,14 +2125,15 @@
     }
 
     function getCategoryCount(categoryName) {
-      if (categoryName === 'All Collections') return collectionCounts.get('all') || products.length;
+      const visibleProducts = visibleReviewProducts();
+      if (categoryName === 'All Collections') return collectionCounts.get('all') ?? visibleProducts.length;
 
       const children = getCategoryChildren(categoryName);
       if (children.length) {
         return children.reduce((sum, childName) => {
           const childTable = tableByName.get(childName);
           const apiCount = childTable ? collectionCounts.get(String(childTable.tableId)) : null;
-          return sum + (apiCount ?? products.filter(product => product.category === childName).length);
+          return sum + (apiCount ?? visibleProducts.filter(product => product.category === childName).length);
         }, 0);
       }
 
@@ -2109,12 +2142,12 @@
         return collectionCounts.get(String(table.tableId));
       }
 
-      return products.filter(product => productMatchesCollection(product, { name: categoryName, tableId: table?.tableId || 'all' })).length;
+      return visibleProducts.filter(product => productMatchesCollection(product, { name: categoryName, tableId: table?.tableId || 'all' })).length;
     }
 
     function filteredProducts() {
       const q = document.getElementById('searchInput')?.value?.toLowerCase() || '';
-      let list = (Array.isArray(products) ? [...products] : [])
+      let list = visibleReviewProducts()
         .filter(product => productMatchesCollection(product, state.selectedCollection));
 
       if (q) {
@@ -2126,10 +2159,11 @@
 
       const status = document.getElementById('statusSelect')?.value || 'All Statuses';
       if (status !== 'All Statuses') {
+        const normalizedStatus = normalizeReviewStatus(status);
         list = list.filter(p =>
-          p.generationStatus === status ||
-          p.approvalStatus === status ||
-          p.shopify === status
+          normalizeReviewStatus(p.generationStatus) === normalizedStatus ||
+          normalizeReviewStatus(p.approvalStatus) === normalizedStatus ||
+          normalizeReviewStatus(p.shopifyNotes ?? p.shopify) === normalizedStatus
         );
       }
 
@@ -2485,12 +2519,39 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    function removeProductFromSareeState(tableId, rowId) {
+      const normalizedTableId = Number(tableId);
+      const normalizedRowId = Number(rowId);
+      products = visibleReviewProducts(products).filter(product =>
+        !(
+          Number(product.tableId) === normalizedTableId &&
+          Number(product.rowId) === normalizedRowId
+        )
+      );
+      state.products = products;
+      state.lastProductsSignature = createSareeProductsSignature(products);
+
+      const tableKey = String(tableId);
+      if (collectionCounts.has(tableKey)) {
+        collectionCounts.set(tableKey, Math.max(0, Number(collectionCounts.get(tableKey) || 0) - 1));
+      }
+      if (collectionCounts.has('all')) {
+        collectionCounts.set('all', Math.max(0, Number(collectionCounts.get('all') || 0) - 1));
+      }
+
+      const nextProduct = filteredProducts()[0];
+      state.selectedProductId = nextProduct?.id || null;
+      state.view = 'grid';
+      state.currentDetailSignature = '';
+    }
+
     async function approveProduct(id) {
       if (id) state.selectedProductId = id;
 
-      const listBeforeApproval = filteredProducts();
       const p = currentProduct();
       if (!p) return;
+      const approvedTableId = p.tableId;
+      const approvedRowId = p.rowId;
 
       try {
         const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/approve`, {
@@ -2507,16 +2568,11 @@
           throw new Error(data.error || 'Approve update failed');
         }
 
-        const currentIndex = listBeforeApproval.findIndex(item => item.id === p.id);
-        const nextProduct = listBeforeApproval[currentIndex + 1] || listBeforeApproval[0];
-
-        if (nextProduct && nextProduct.id !== p.id) {
-          state.selectedProductId = nextProduct.id;
-        }
-
+        removeProductFromSareeState(approvedTableId, approvedRowId);
+        renderAll(false);
+        showToast('Approved successfully. Product removed from the review dashboard.');
         await fetchCollections({ force: true, render: true });
-        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
-        showToast('Approved successfully and updated in Baserow.');
+        await fetchProductsFromAPI({ force: true, preserveDetail: false, preserveScroll: true, silent: true });
       } catch (error) {
         console.error(error);
         showToast('Approve failed. Check backend server logs.');

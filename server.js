@@ -824,6 +824,7 @@ async function invalidateProductCache(tableId = null) {
     cacheDelete(cacheKey("diagnose")),
     cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
     tableId ? cacheDelete(cacheKey("products", "table-approved", tableId)) : Promise.resolve(),
+    tableId ? cacheDelete(cacheKey("products", "table-visible", tableId)) : Promise.resolve(),
   ]);
 }
 
@@ -925,6 +926,17 @@ function getSelectValue(value) {
   if (typeof value === "number") return String(value);
   if (typeof value === "object") return value.value || value.name || String(value.id || "");
   return String(value);
+}
+
+function normalizeReviewStatus(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object" && value.value !== undefined) {
+    return String(value.value).trim().toLowerCase();
+  }
+  if (typeof value === "object" && value.name !== undefined) {
+    return String(value.name).trim().toLowerCase();
+  }
+  return String(value).trim().toLowerCase();
 }
 
 function readField(row, fieldId, fallbackName, fieldMap = null) {
@@ -1349,8 +1361,44 @@ function buildMediaItems(namedRow, fieldMap, tableConfig, type) {
 
 function isApprovedGeneration(row, tableConfig, fieldMap = null) {
   const status = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
-  const value = getSelectValue(status);
-  return value === "Approved" || status?.id === 5987929;
+  const value = normalizeReviewStatus(status);
+  return value === "approved" || status?.id === 5987929;
+}
+
+function shouldShowReviewProduct(product) {
+  const generationStatus = normalizeReviewStatus(
+    product.generationStatus ??
+    product["Generation Status"]
+  );
+  const shopifyNotes = normalizeReviewStatus(
+    product.shopifyNotes ??
+    product.shopifyStatus ??
+    product.shopify ??
+    product["SHOPIFY Notes"] ??
+    product.SHOPIFY
+  );
+  return generationStatus === "approved" && shopifyNotes !== "approved";
+}
+
+function isVisibleReviewRow(row, tableConfig, fieldMap = null) {
+  const generationStatus = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
+  const shopifyNotes = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
+  return shouldShowReviewProduct({ generationStatus, shopifyNotes });
+}
+
+function validateReviewTableConfig(tableConfig, fieldMap = null) {
+  const generationField = fieldMap ? findConfiguredField(fieldMap, tableConfig.fields.generationStatus) : tableConfig.fields.generationStatus;
+  const shopifyField = fieldMap ? findConfiguredField(fieldMap, tableConfig.fields.shopify) : tableConfig.fields.shopify;
+  const valid = Boolean(tableConfig.tableId && generationField && shopifyField);
+  if (!valid) {
+    console.warn("Review table configuration warning:", {
+      collection: tableConfig.name,
+      tableId: tableConfig.tableId,
+      generationStatusConfigured: Boolean(generationField),
+      shopifyNotesConfigured: Boolean(shopifyField),
+    });
+  }
+  return valid;
 }
 
 function normalizeProduct(row, tableConfig, fieldMap = null) {
@@ -1385,6 +1433,8 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
     generationStatus: getSelectValue(generationStatus),
     approvalStatus: getSelectValue(readField(row, null, "Approvel", fieldMap)) || getSelectValue(readField(row, null, "Approval", fieldMap)) || "Pending Review",
     shopify: getSelectValue(shopify) || "Pending",
+    shopifyNotes: getSelectValue(shopify) || "",
+    shopifyStatus: getSelectValue(shopify) || "",
     comment: comment || "",
     modified: readField(row, null, "Last Modified", fieldMap) || row.updated_on || row.created_on || "",
     specifications: readField(row, null, "Specifications", fieldMap) || "",
@@ -1410,7 +1460,7 @@ function sortProducts(products, sort) {
 }
 
 function applyProductFilters(products, { search, status, sort }) {
-  let filtered = [...products];
+  let filtered = [...products].filter(shouldShowReviewProduct);
 
   if (search) {
     const q = String(search).toLowerCase();
@@ -1421,10 +1471,11 @@ function applyProductFilters(products, { search, status, sort }) {
   }
 
   if (status && status !== "All Statuses") {
+    const normalizedStatus = normalizeReviewStatus(status);
     filtered = filtered.filter((product) =>
-      product.generationStatus === status ||
-      product.approvalStatus === status ||
-      product.shopify === status
+      normalizeReviewStatus(product.generationStatus) === normalizedStatus ||
+      normalizeReviewStatus(product.approvalStatus) === normalizedStatus ||
+      normalizeReviewStatus(product.shopifyNotes ?? product.shopify) === normalizedStatus
     );
   }
 
@@ -1465,9 +1516,10 @@ async function fetchBaserowRows(tableId) {
   return allRows;
 }
 
-async function fetchApprovedForTable(tableConfig) {
-  const approvedCacheKey = cacheKey("products", "table-approved", tableConfig.tableId);
-  const cached = await cacheGet(approvedCacheKey);
+async function fetchApprovedForTable(tableConfig, options = {}) {
+  const { force = false } = options;
+  const visibleCacheKey = cacheKey("products", "table-visible", tableConfig.tableId);
+  const cached = force ? null : await cacheGet(visibleCacheKey);
   if (cached) {
     return {
       ...cached,
@@ -1479,18 +1531,31 @@ async function fetchApprovedForTable(tableConfig) {
     fetchBaserowRows(tableConfig.tableId),
     fetchFieldMap(tableConfig.tableId),
   ]);
+  if (!validateReviewTableConfig(tableConfig, fieldMap)) {
+    return {
+      tableConfig,
+      rows,
+      fieldMap,
+      approvedRows: [],
+      visibleRows: [],
+      products: [],
+    };
+  }
   const approvedRows = rows.filter((row) => isApprovedGeneration(row, tableConfig, fieldMap));
+  const visibleRows = rows.filter((row) => isVisibleReviewRow(row, tableConfig, fieldMap));
   const result = {
     tableConfig,
     rows,
     fieldMap,
     approvedRows,
-    products: approvedRows.map((row) => normalizeProduct(row, tableConfig, fieldMap)),
+    visibleRows,
+    products: visibleRows.map((row) => normalizeProduct(row, tableConfig, fieldMap)),
   };
-  await cacheSet(approvedCacheKey, {
+  await cacheSet(visibleCacheKey, {
     tableConfig,
     rows,
     approvedRows,
+    visibleRows,
     products: result.products,
   }, CACHE_PRODUCTS_TTL);
   return result;
@@ -2159,13 +2224,14 @@ function buildCollectionGroups(collections) {
   return groups;
 }
 
-async function buildCollectionsPayload() {
+async function buildCollectionsPayload(options = {}) {
+  const { force = false } = options;
   const collections = [];
   const errors = [];
 
   await mapWithConcurrency(SAREE_TABLES, 4, async (tableConfig) => {
     try {
-      const { approvedRows } = await fetchApprovedForTable(tableConfig);
+      const { products } = await fetchApprovedForTable(tableConfig, { force });
       collections.push({
         name: tableConfig.name,
         displayName: tableConfig.displayName,
@@ -2174,7 +2240,7 @@ async function buildCollectionsPayload() {
         group: collectionGroupName(tableConfig),
         subcategory: tableConfig.subcategory,
         mediaProfile: tableConfig.mediaProfile,
-        count: approvedRows.length,
+        count: products.length,
         error: null,
       });
     } catch (error) {
@@ -2261,7 +2327,7 @@ async function buildProductsPayload(query = {}) {
 
   await mapWithConcurrency(tablesToFetch, 4, async (tableConfig) => {
     try {
-      const result = await fetchApprovedForTable(tableConfig);
+      const result = await fetchApprovedForTable(tableConfig, { force: query.refresh === "1" || query.force === "1" });
       products.push(...result.products);
       collections.push({
         name: tableConfig.name,
@@ -2310,7 +2376,7 @@ async function buildProductsPayload(query = {}) {
       totalTables: tablesToFetch.length,
       successfulTables: collections.filter((item) => !item.error).length,
       failedTables: errors.length,
-      filter: "Generation Status = Approved",
+      filter: "Generation Status = Approved and Shopify Notes != Approved",
     },
   };
 }
@@ -2318,14 +2384,15 @@ async function buildProductsPayload(query = {}) {
 app.get("/api/collections", async (req, res) => {
   try {
     const key = cacheKey("collections");
-    const cached = await cacheGet(key);
+    const bypassCache = req.query.refresh === "1" || req.query.force === "1";
+    const cached = bypassCache ? null : await cacheGet(key);
     if (cached) {
       return res.json({ ...cached, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_COLLECTIONS_TTL } });
     }
 
-    const payload = await buildCollectionsPayload();
+    const payload = await buildCollectionsPayload({ force: bypassCache });
     await cacheSet(key, payload, CACHE_COLLECTIONS_TTL);
-    res.json({ ...payload, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_COLLECTIONS_TTL } });
+    res.json({ ...payload, cache: { provider: cacheProvider(), status: bypassCache ? "bypass" : "miss", ttlSeconds: CACHE_COLLECTIONS_TTL } });
   } catch (error) {
     console.error(error);
     res.status(error.status || 500).json({ success: false, error: error.message });
@@ -2335,7 +2402,8 @@ app.get("/api/collections", async (req, res) => {
 app.get("/api/products", async (req, res) => {
   try {
     const key = productCacheKey(req.query);
-    const cached = await cacheGet(key);
+    const bypassCache = req.query.refresh === "1" || req.query.force === "1";
+    const cached = bypassCache ? null : await cacheGet(key);
     if (cached) {
       const products = applyProductFilters(cached.products || [], req.query);
       return res.json({
@@ -2353,7 +2421,7 @@ app.get("/api/products", async (req, res) => {
       ...payload,
       count: products.length,
       products,
-      debug: { ...payload.debug, cache: { provider: cacheProvider(), status: "miss", ttlSeconds: CACHE_PRODUCTS_TTL } },
+      debug: { ...payload.debug, cache: { provider: cacheProvider(), status: bypassCache ? "bypass" : "miss", ttlSeconds: CACHE_PRODUCTS_TTL } },
     });
   } catch (error) {
     console.error(error);
@@ -2366,9 +2434,12 @@ app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
     const { tableId, rowId } = req.params;
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
+    const fieldMap = await fetchFieldMap(tableId);
+    if (!validateReviewTableConfig(tableConfig, fieldMap)) {
+      return res.status(400).json({ success: false, tableId, rowId, error: `Missing review status field mapping for ${tableConfig.name}.` });
+    }
 
     const updatedRow = await patchBaserowRow(tableId, rowId, buildApprovePayload(tableConfig));
-    const fieldMap = await fetchFieldMap(tableId);
     await invalidateProductCache(tableId);
 
     res.json({
@@ -2377,6 +2448,8 @@ app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
       rowId: Number(rowId),
       action: "approve",
       message: "Product approved for Shopify.",
+      shopifyNotes: SHOPIFY_NOTES_APPROVED_VALUE,
+      hiddenFromDashboard: true,
       row: normalizeProduct(updatedRow, tableConfig, fieldMap),
     });
   } catch (error) {
@@ -2391,12 +2464,15 @@ app.patch("/api/products/:tableId/:rowId/request-changes", async (req, res) => {
     const { tableId, rowId } = req.params;
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
+    const fieldMap = await fetchFieldMap(tableId);
+    if (!validateReviewTableConfig(tableConfig, fieldMap)) {
+      return res.status(400).json({ success: false, tableId, rowId, error: `Missing review status field mapping for ${tableConfig.name}.` });
+    }
 
     const { changeType = "Other", feedback = "", comment = "" } = req.body || {};
     const feedbackText = feedback || comment || "Changes requested from review portal.";
     const finalComment = `Change Type: ${changeType}\n\n${feedbackText}`;
     const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, finalComment));
-    const fieldMap = await fetchFieldMap(tableId);
     await invalidateProductCache(tableId);
 
     res.json({
@@ -2419,11 +2495,14 @@ app.patch("/api/products/:tableId/:rowId/reject", async (req, res) => {
     const { tableId, rowId } = req.params;
     const tableConfig = getTableConfig(tableId);
     if (!tableConfig) return res.status(400).json({ success: false, tableId, rowId, error: `Unknown tableId ${tableId}` });
+    const fieldMap = await fetchFieldMap(tableId);
+    if (!validateReviewTableConfig(tableConfig, fieldMap)) {
+      return res.status(400).json({ success: false, tableId, rowId, error: `Missing review status field mapping for ${tableConfig.name}.` });
+    }
 
     const { feedback = "", comment = "" } = req.body || {};
     const feedbackText = feedback || comment || "Rejected from review portal";
     const updatedRow = await patchBaserowRow(tableId, rowId, buildRejectPayload(tableConfig, feedbackText));
-    const fieldMap = await fetchFieldMap(tableId);
     await invalidateProductCache(tableId);
 
     res.json({
