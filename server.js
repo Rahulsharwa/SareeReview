@@ -53,7 +53,13 @@ const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
 const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
 const MAX_UPLOAD_SIZE_MB = Math.max(1, Math.min(Number(process.env.MAX_UPLOAD_SIZE_MB || 50), 50));
 const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
-const UPLOAD_MAX_FILES = Math.max(1, Math.min(Number(process.env.UPLOAD_MAX_FILES || 4), 4));
+const UPLOAD_REFERENCE_ROLES = ["saree", "blouse", "pallu", "border"];
+const ALLOWED_UPLOAD_ROLES = new Set(UPLOAD_REFERENCE_ROLES);
+const CONFIGURED_UPLOAD_MAX_FILES = Math.max(
+  1,
+  Math.min(Number(process.env.UPLOAD_MAX_FILES || UPLOAD_REFERENCE_ROLES.length), UPLOAD_REFERENCE_ROLES.length),
+);
+const UPLOAD_MAX_FILES = Math.max(CONFIGURED_UPLOAD_MAX_FILES, UPLOAD_REFERENCE_ROLES.length);
 const UPLOAD_CLIENT_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.UPLOAD_CLIENT_TIMEOUT_MS || 900000), 1800000));
 const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_ENABLED || "").toLowerCase() === "true";
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
@@ -71,7 +77,6 @@ const UPLOAD_IMAGE_MIME_TYPES = new Set(
     .filter(Boolean)
 );
 const UPLOAD_ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
-const ALLOWED_UPLOAD_ROLES = new Set(["saree", "blouse", "pallu", "border"]);
 const UPLOAD_FIELDS = {
   productTitle: process.env.UPLOAD_FIELD_PRODUCT_TITLE || "9535465",
   productCode: process.env.UPLOAD_FIELD_PRODUCT_CODE || "9535466",
@@ -599,8 +604,8 @@ const uploadSareeMulter = multer({
   limits: {
     fileSize: MAX_UPLOAD_SIZE_BYTES,
     files: UPLOAD_MAX_FILES,
-    fields: 10,
-    parts: 12,
+    fields: 20,
+    parts: 30,
   },
   fileFilter: (req, file, cb) => {
     if (!UPLOAD_IMAGE_MIME_TYPES.has(String(file.mimetype || "").toLowerCase())) {
@@ -2967,17 +2972,25 @@ app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLim
 app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
   const stagedPathnames = [];
   try {
-    const files = req.body?.files || {};
+    const files = req.body?.files && typeof req.body.files === "object" && !Array.isArray(req.body.files)
+      ? req.body.files
+      : {};
     const invalidRoles = Object.keys(files).filter((role) => !ALLOWED_UPLOAD_ROLES.has(role));
     if (invalidRoles.length) {
       return res.status(400).json({ ok: false, code: "INVALID_FILE_ROLE", message: "Invalid image role." });
     }
-    const fileEntries = Object.entries(files).filter(([, value]) => value);
+    const selectedFileEntries = Object.entries(files).filter(
+      ([role, file]) => ALLOWED_UPLOAD_ROLES.has(role) && file && typeof file === "object" && !Array.isArray(file),
+    );
     if (!files.saree) {
       return res.status(400).json({ ok: false, code: "SAREE_IMAGE_REQUIRED", message: "Please upload Saree Image." });
     }
-    if (fileEntries.length > UPLOAD_MAX_FILES) {
-      return res.status(400).json({ ok: false, code: "TOO_MANY_FILES", message: "Maximum four images are allowed per upload." });
+    if (selectedFileEntries.length > UPLOAD_MAX_FILES) {
+      return res.status(400).json({
+        ok: false,
+        code: "TOO_MANY_FILES",
+        message: `Maximum ${UPLOAD_MAX_FILES} images are allowed per upload.`,
+      });
     }
 
     const verifiedFiles = {};
@@ -3028,7 +3041,12 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
     } catch (cleanupError) {
       console.warn("Upload staging cleanup failed", { pathnames: stagedPathnames, message: cleanupError.message });
     }
-    res.json({ ok: true, row: normalizeUploadRow(created) });
+    res.json({
+      ok: true,
+      uploadedCount: selectedFileEntries.length,
+      generationStatus: UPLOAD_GENERATION_STATUS.start,
+      row: normalizeUploadRow(created),
+    });
   } catch (error) {
     try {
       await cleanupUploadBlobPathnames(stagedPathnames);
@@ -3053,7 +3071,11 @@ app.post("/api/upload-saree/cleanup-upload", requireSocialReviewAuth, async (req
   try {
     const pathnames = Array.isArray(req.body?.pathnames) ? req.body.pathnames : [];
     if (pathnames.length > UPLOAD_MAX_FILES) {
-      return res.status(400).json({ ok: false, code: "TOO_MANY_PATHS", message: "Maximum four upload paths can be cleaned at once." });
+      return res.status(400).json({
+        ok: false,
+        code: "TOO_MANY_PATHS",
+        message: `Maximum ${UPLOAD_MAX_FILES} upload paths can be cleaned at once.`,
+      });
     }
     const result = await cleanupUploadBlobPathnames(pathnames);
     res.json({ ok: true, ...result });

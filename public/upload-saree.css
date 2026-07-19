@@ -326,6 +326,36 @@
   flex-wrap: wrap;
 }
 
+.upload-form-message {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 100%;
+  color: var(--upload-green);
+  overflow-wrap: anywhere;
+}
+
+.upload-form-message[hidden] {
+  display: none;
+}
+
+.upload-form-message.error {
+  color: var(--upload-red);
+}
+
+.upload-form-message.success {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.upload-form-message.success strong,
+.upload-form-message.success span {
+  display: block;
+}
+
 .upload-saree-progress {
   display: grid;
   gap: 10px;
