@@ -1378,10 +1378,15 @@
               </div>
             </label>
           </div>
-          <label>Comment / Notes<textarea name="commentNotes" rows="4"></textarea></label>
-          <div class="upload-file-grid">
+          <label class="upload-field-full" for="uploadDescriptions">Descriptions
+            <textarea id="uploadDescriptions" name="descriptions" rows="5" placeholder="Add product description, fabric details, craftsmanship, occasion, care instructions, or other customer-facing information..."></textarea>
+          </label>
+          <label class="upload-field-full">Comment / Notes<textarea name="commentNotes" rows="4"></textarea></label>
+          <div class="upload-file-grid upload-reference-upload-grid">
             <label class="upload-file">Saree Image <strong>Required</strong><input name="sareeImage" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" /></label>
             <label class="upload-file">Blouse Image <span>Optional</span><input name="blouseImage" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" /></label>
+            <label class="upload-file">Pallu Image <span>Optional</span><input name="palluImage" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" /></label>
+            <label class="upload-file">Border Image <span>Optional</span><input name="borderImage" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" /></label>
           </div>
           <div id="uploadSareeProgress" class="upload-saree-progress" hidden>
             <div class="upload-progress-header">
@@ -1420,9 +1425,10 @@
         <button class="upload-icon-btn" type="button" onclick="closeUploadDetail()">x</button>
       </header>
       <main id="uploadDetailBody" class="upload-detail-body">
+        <section id="uploadProductInformation" class="upload-detail-information" hidden></section>
         <section class="upload-detail-compare">
           <section class="compare-panel reference-panel">
-            <h3>Origin Saree</h3>
+            <h3>Reference Images</h3>
             <div id="uploadReferenceImages" class="upload-media-grid"></div>
           </section>
           <section class="compare-panel generated-panel">

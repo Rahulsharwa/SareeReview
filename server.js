@@ -53,13 +53,13 @@ const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
 const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
 const MAX_UPLOAD_SIZE_MB = Math.max(1, Math.min(Number(process.env.MAX_UPLOAD_SIZE_MB || 50), 50));
 const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
-const UPLOAD_MAX_FILES = Math.max(1, Math.min(Number(process.env.UPLOAD_MAX_FILES || 2), 2));
+const UPLOAD_MAX_FILES = Math.max(1, Math.min(Number(process.env.UPLOAD_MAX_FILES || 4), 4));
 const UPLOAD_CLIENT_TIMEOUT_MS = Math.max(30000, Math.min(Number(process.env.UPLOAD_CLIENT_TIMEOUT_MS || 900000), 1800000));
 const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_ENABLED || "").toLowerCase() === "true";
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v3";
+const UPLOAD_SAREE_CACHE_VERSION = "v4";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
@@ -71,6 +71,7 @@ const UPLOAD_IMAGE_MIME_TYPES = new Set(
     .filter(Boolean)
 );
 const UPLOAD_ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const ALLOWED_UPLOAD_ROLES = new Set(["saree", "blouse", "pallu", "border"]);
 const UPLOAD_FIELDS = {
   productTitle: process.env.UPLOAD_FIELD_PRODUCT_TITLE || "9535465",
   productCode: process.env.UPLOAD_FIELD_PRODUCT_CODE || "9535466",
@@ -78,6 +79,9 @@ const UPLOAD_FIELDS = {
   price: process.env.UPLOAD_FIELD_PRICE || "9535468",
   sareeImage: process.env.UPLOAD_FIELD_SAREE_IMAGE || "9535469",
   blouseImage: process.env.UPLOAD_FIELD_BLOUSE_IMAGE || "9535470",
+  palluImage: process.env.UPLOAD_FIELD_PALLU_IMAGE || "9626173",
+  borderImage: process.env.UPLOAD_FIELD_BORDER_IMAGE || "9626175",
+  descriptions: process.env.UPLOAD_FIELD_DESCRIPTIONS || "9626178",
   generationStatus: process.env.UPLOAD_FIELD_GENERATION_STATUS || "9535471",
   commentNotes: process.env.UPLOAD_FIELD_COMMENT_NOTES || "9535472",
   frontView: process.env.UPLOAD_FIELD_FRONT_VIEW || "9535578",
@@ -1859,9 +1863,17 @@ function getUploadConfigStatus() {
     maxFileSizeMb: MAX_UPLOAD_SIZE_MB,
     maxUploadSizeMb: MAX_UPLOAD_SIZE_MB,
     maxFiles: UPLOAD_MAX_FILES,
+    maxUploadFiles: UPLOAD_MAX_FILES,
     allowedMimeTypes: Array.from(UPLOAD_IMAGE_MIME_TYPES),
     directStorageEnabled: UPLOAD_DIRECT_STORAGE_ENABLED,
     blobConfigured: UPLOAD_BLOB_CONFIGURED,
+    referenceFields: {
+      saree: Boolean(UPLOAD_FIELDS.sareeImage),
+      blouse: Boolean(UPLOAD_FIELDS.blouseImage),
+      pallu: Boolean(UPLOAD_FIELDS.palluImage),
+      border: Boolean(UPLOAD_FIELDS.borderImage),
+      descriptions: Boolean(UPLOAD_FIELDS.descriptions),
+    },
     clientTimeoutMs: UPLOAD_CLIENT_TIMEOUT_MS,
     ...(!UPLOAD_BLOB_CONFIGURED && UPLOAD_DIRECT_STORAGE_ENABLED
       ? { message: "Direct upload storage is not configured." }
@@ -1893,7 +1905,7 @@ function hasValidUploadFilename(filename) {
 
 function validateUploadBlobPathname(pathname, role = "") {
   const value = String(pathname || "").trim();
-  const safeRole = role === "blouse" ? "blouse" : role === "saree" ? "saree" : "";
+  const safeRole = ALLOWED_UPLOAD_ROLES.has(role) ? role : "";
   if (!value || value.includes("..") || value.includes("\\") || value.startsWith("/")) return "";
   if (!value.startsWith(`${UPLOAD_BLOB_PREFIX}/`)) return "";
   if (safeRole && !value.includes(`/${safeRole}/`)) return "";
@@ -2037,6 +2049,9 @@ function readUploadField(row, name) {
     price: "Price",
     sareeImage: "Saree Image",
     blouseImage: "Blouse Image",
+    palluImage: "Pallu Image",
+    borderImage: "Border Image",
+    descriptions: "Descriptions",
     generationStatus: "Generation Status",
     commentNotes: "Comment / Notes",
     frontView: "Front View",
@@ -2053,6 +2068,7 @@ function normalizeUploadRow(row = {}) {
   const category = normalizeSocialText(readUploadField(row, "category"));
   const price = normalizeSocialText(readUploadField(row, "price"));
   const generationStatus = normalizeSocialText(readUploadField(row, "generationStatus"));
+  const descriptions = normalizeSocialText(readUploadField(row, "descriptions"));
   const commentNotes = normalizeSocialText(readUploadField(row, "commentNotes"));
   return {
     rowId: row.id,
@@ -2061,10 +2077,13 @@ function normalizeUploadRow(row = {}) {
     category: category || "No category",
     price: price || "Price not added",
     generationStatus,
+    descriptions,
     commentNotes,
     images: {
       saree: firstUploadFileUrl(readUploadField(row, "sareeImage")),
       blouse: firstUploadFileUrl(readUploadField(row, "blouseImage")),
+      pallu: firstUploadFileUrl(readUploadField(row, "palluImage")),
+      border: firstUploadFileUrl(readUploadField(row, "borderImage")),
       front: firstUploadFileUrl(readUploadField(row, "frontView")),
       side: firstUploadFileUrl(readUploadField(row, "sideView")),
       back: firstUploadFileUrl(readUploadField(row, "backView")),
@@ -2108,17 +2127,31 @@ async function fetchRecentUploadSarees({ refresh = false } = {}) {
   return payload;
 }
 
-function buildUploadCreatePayload({ productTitle, productCode, category, price, commentNotes, sareeUploadedFile, blouseUploadedFile = null }) {
+function buildUploadCreatePayload({
+  productTitle,
+  productCode,
+  category,
+  price,
+  descriptions,
+  commentNotes,
+  sareeUploadedFile,
+  blouseUploadedFile = null,
+  palluUploadedFile = null,
+  borderUploadedFile = null,
+}) {
   const payload = {
     [uploadFieldKey("sareeImage")]: [sareeUploadedFile],
     [uploadFieldKey("generationStatus")]: UPLOAD_GENERATION_STATUS.start,
   };
 
   if (blouseUploadedFile) payload[uploadFieldKey("blouseImage")] = [blouseUploadedFile];
+  if (palluUploadedFile) payload[uploadFieldKey("palluImage")] = [palluUploadedFile];
+  if (borderUploadedFile) payload[uploadFieldKey("borderImage")] = [borderUploadedFile];
   appendOptionalUploadField(payload, "productTitle", productTitle);
   appendOptionalUploadField(payload, "productCode", productCode);
   appendOptionalUploadField(payload, "category", category);
   appendOptionalUploadField(payload, "price", price);
+  appendOptionalUploadField(payload, "descriptions", descriptions);
   appendOptionalUploadField(payload, "commentNotes", commentNotes);
   return payload;
 }
@@ -2889,7 +2922,7 @@ app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLim
         const role = metadata?.role;
         const mimeType = String(metadata?.mimeType || "").trim().toLowerCase();
         const declaredSize = Number(metadata?.declaredSize || 0);
-        if (role !== "saree" && role !== "blouse") {
+        if (!ALLOWED_UPLOAD_ROLES.has(role)) {
           const error = new Error("Invalid image role.");
           error.status = 400;
           throw error;
@@ -2935,16 +2968,20 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
   const stagedPathnames = [];
   try {
     const files = req.body?.files || {};
+    const invalidRoles = Object.keys(files).filter((role) => !ALLOWED_UPLOAD_ROLES.has(role));
+    if (invalidRoles.length) {
+      return res.status(400).json({ ok: false, code: "INVALID_FILE_ROLE", message: "Invalid image role." });
+    }
     const fileEntries = Object.entries(files).filter(([, value]) => value);
     if (!files.saree) {
       return res.status(400).json({ ok: false, code: "SAREE_IMAGE_REQUIRED", message: "Please upload Saree Image." });
     }
     if (fileEntries.length > UPLOAD_MAX_FILES) {
-      return res.status(400).json({ ok: false, code: "TOO_MANY_FILES", message: "Maximum two images are allowed per upload." });
+      return res.status(400).json({ ok: false, code: "TOO_MANY_FILES", message: "Maximum four images are allowed per upload." });
     }
 
     const verifiedFiles = {};
-    for (const role of ["saree", "blouse"]) {
+    for (const role of ALLOWED_UPLOAD_ROLES) {
       if (!files[role]) continue;
       const descriptor = validateUploadFileDescriptor(files[role], role);
       stagedPathnames.push(descriptor.pathname);
@@ -2973,9 +3010,12 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
       productCode: req.body?.productCode,
       category: req.body?.category,
       price: req.body?.price,
+      descriptions: req.body?.descriptions,
       commentNotes: req.body?.commentNotes,
       sareeUploadedFile: verifiedFiles.saree,
       blouseUploadedFile: verifiedFiles.blouse || null,
+      palluUploadedFile: verifiedFiles.pallu || null,
+      borderUploadedFile: verifiedFiles.border || null,
     });
 
     const created = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?user_field_names=false`, {
@@ -3004,7 +3044,7 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
         ? "Baserow rejected the image because it exceeds the file limit configured for this Baserow account."
         : error.message === "Upload Baserow token is not configured."
           ? error.message
-          : "Unable to save uploaded images.",
+          : "One or more reference images could not be saved. No Baserow row was created.",
     });
   }
 });
@@ -3013,7 +3053,7 @@ app.post("/api/upload-saree/cleanup-upload", requireSocialReviewAuth, async (req
   try {
     const pathnames = Array.isArray(req.body?.pathnames) ? req.body.pathnames : [];
     if (pathnames.length > UPLOAD_MAX_FILES) {
-      return res.status(400).json({ ok: false, code: "TOO_MANY_PATHS", message: "Maximum two upload paths can be cleaned at once." });
+      return res.status(400).json({ ok: false, code: "TOO_MANY_PATHS", message: "Maximum four upload paths can be cleaned at once." });
     }
     const result = await cleanupUploadBlobPathnames(pathnames);
     res.json({ ok: true, ...result });
@@ -3034,6 +3074,8 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
   uploadSareeMulter.fields([
     { name: "sareeImage", maxCount: 1 },
     { name: "blouseImage", maxCount: 1 },
+    { name: "palluImage", maxCount: 1 },
+    { name: "borderImage", maxCount: 1 },
   ])(req, res, async (uploadError) => {
     try {
       if (uploadError) {
@@ -3045,21 +3087,28 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
 
       const sareeImage = req.files?.sareeImage?.[0] || null;
       const blouseImage = req.files?.blouseImage?.[0] || null;
+      const palluImage = req.files?.palluImage?.[0] || null;
+      const borderImage = req.files?.borderImage?.[0] || null;
       if (!sareeImage) {
         return res.status(400).json({ ok: false, error: "Please upload Saree Image." });
       }
 
       const sareeUploadedFile = await uploadBaserowFile(sareeImage);
       const blouseUploadedFile = blouseImage ? await uploadBaserowFile(blouseImage) : null;
+      const palluUploadedFile = palluImage ? await uploadBaserowFile(palluImage) : null;
+      const borderUploadedFile = borderImage ? await uploadBaserowFile(borderImage) : null;
 
       const payload = buildUploadCreatePayload({
         productTitle: req.body?.productTitle,
         productCode: req.body?.productCode,
         category: req.body?.category,
         price: req.body?.price,
+        descriptions: req.body?.descriptions,
         commentNotes: req.body?.commentNotes,
         sareeUploadedFile,
         blouseUploadedFile,
+        palluUploadedFile,
+        borderUploadedFile,
       });
 
       const created = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?user_field_names=false`, {
@@ -3077,6 +3126,8 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
       const uploadedFiles = [
         ...(req.files?.sareeImage || []),
         ...(req.files?.blouseImage || []),
+        ...(req.files?.palluImage || []),
+        ...(req.files?.borderImage || []),
       ];
       await Promise.all(uploadedFiles.map((file) => file?.path ? unlink(file.path).catch(() => {}) : null));
     }

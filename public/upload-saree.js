@@ -35,9 +35,21 @@ const uploadSareeState = {
   uploadTimedOut: false,
   uploadAbortController: null,
   uploadedBlobPaths: [],
+  sareeFile: null,
+  blouseFile: null,
+  palluFile: null,
+  borderFile: null,
+  previewUrls: {
+    saree: null,
+    blouse: null,
+    pallu: null,
+    border: null,
+  },
   fileProgress: {
     saree: 0,
     blouse: 0,
+    pallu: 0,
+    border: 0,
   },
 };
 
@@ -112,6 +124,8 @@ function getUploadMainImage(row) {
   if (hasUploadImage(images.front)) return { url: images.front, type: "generated", label: "Front View" };
   if (hasUploadImage(images.saree)) return { url: images.saree, type: "reference", label: "Saree Image" };
   if (hasUploadImage(images.blouse)) return { url: images.blouse, type: "reference", label: "Blouse Image" };
+  if (hasUploadImage(images.pallu)) return { url: images.pallu, type: "reference", label: "Pallu Image" };
+  if (hasUploadImage(images.border)) return { url: images.border, type: "reference", label: "Border Image" };
   return { url: "", type: "empty", label: "No reference image" };
 }
 
@@ -168,6 +182,8 @@ function stableUploadRowsSignature(rows) {
     status: row.generationStatus || row.status || "",
     saree: row.images?.saree || "",
     blouse: row.images?.blouse || "",
+    pallu: row.images?.pallu || "",
+    border: row.images?.border || "",
     front: row.images?.front || "",
     side: row.images?.side || "",
     back: row.images?.back || "",
@@ -176,6 +192,8 @@ function stableUploadRowsSignature(rows) {
     code: row.productCode || "",
     category: row.category || "",
     price: row.price || "",
+    descriptions: row.descriptions || "",
+    commentNotes: row.commentNotes || "",
   })));
 }
 
@@ -185,10 +203,14 @@ function getUploadDetailSignature(row) {
     status: row.generationStatus || row.status || "",
     saree: row.images?.saree || "",
     blouse: row.images?.blouse || "",
+    pallu: row.images?.pallu || "",
+    border: row.images?.border || "",
     front: row.images?.front || "",
     side: row.images?.side || "",
     back: row.images?.back || "",
     closeUp: row.images?.closeUp || "",
+    descriptions: row.descriptions || "",
+    commentNotes: row.commentNotes || "",
   });
 }
 
@@ -300,7 +322,7 @@ function validateUploadImageFile(file, label) {
     throw new Error(`${label} must use a .jpg, .jpeg, .png, or .webp extension.`);
   }
   if (file.size > getMaxUploadSizeBytes()) {
-    throw new Error(`The selected image exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
+    throw new Error(`The selected ${label} exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
   }
   if (file.size <= 0) {
     throw new Error(`${label} is empty.`);
@@ -332,6 +354,8 @@ function calculateTotalUploadProgress(files, progress) {
   const entries = [
     { role: "saree", file: files.saree },
     { role: "blouse", file: files.blouse },
+    { role: "pallu", file: files.pallu },
+    { role: "border", file: files.border },
   ].filter((entry) => entry.file);
   const totalBytes = entries.reduce((sum, entry) => sum + entry.file.size, 0);
   if (!totalBytes) return 0;
@@ -499,6 +523,8 @@ function renderUploadRows() {
     const referenceThumbs = [
       { key: "saree", label: "Saree", url: row.images?.saree },
       ...(hasUploadImage(row.images?.blouse) ? [{ key: "blouse", label: "Blouse", url: row.images.blouse }] : []),
+      ...(hasUploadImage(row.images?.pallu) ? [{ key: "pallu", label: "Pallu", url: row.images.pallu }] : []),
+      ...(hasUploadImage(row.images?.border) ? [{ key: "border", label: "Border", url: row.images.border }] : []),
       { key: "front", label: "Front View", url: row.images?.front },
       { key: "side", label: "Side View", url: row.images?.side },
       { key: "back", label: "Back View", url: row.images?.back },
@@ -546,10 +572,35 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   const mobileFeedback = document.getElementById("uploadApprovalNote");
   if (mobileFeedback) mobileFeedback.value = feedback;
 
+  const information = document.getElementById("uploadProductInformation");
+  const informationItems = [
+    ...(String(row.descriptions || "").trim()
+      ? [{ label: "Descriptions", value: row.descriptions, className: "upload-detail-description" }]
+      : []),
+    ...(String(row.commentNotes || "").trim()
+      ? [{ label: "Comment / Notes", value: row.commentNotes, className: "upload-detail-notes" }]
+      : []),
+  ];
+  if (information) {
+    information.hidden = informationItems.length === 0;
+    information.innerHTML = informationItems.map((item) => `
+      <div class="upload-detail-info-item">
+        <h3>${uploadEscapeHtml(item.label)}</h3>
+        <div class="${uploadEscapeAttr(item.className)}">${uploadEscapeHtml(item.value)}</div>
+      </div>
+    `).join("");
+  }
+
   const referenceBlocks = [
-    { label: "Origin Saree", url: row.images?.saree, empty: "Saree image not available" },
+    { label: "Saree Image", url: row.images?.saree, empty: "Saree image not available" },
     ...(hasUploadImage(row.images?.blouse)
       ? [{ label: "Blouse Image", url: row.images.blouse, empty: "Blouse image not uploaded" }]
+      : []),
+    ...(hasUploadImage(row.images?.pallu)
+      ? [{ label: "Pallu Image", url: row.images.pallu, empty: "Pallu image not uploaded" }]
+      : []),
+    ...(hasUploadImage(row.images?.border)
+      ? [{ label: "Border Image", url: row.images.border, empty: "Border image not uploaded" }]
       : []),
   ];
   document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
@@ -787,6 +838,8 @@ async function submitUploadSaree(event) {
 async function submitUploadSareeLegacy(form) {
   const sareeFile = form.elements.sareeImage.files[0];
   const blouseFile = form.elements.blouseImage.files[0] || null;
+  const palluFile = form.elements.palluImage.files[0] || null;
+  const borderFile = form.elements.borderImage.files[0] || null;
   const submitBtn = document.getElementById("uploadSubmitBtn");
 
   if (isRunningOnVercelProduction() && sareeFile && sareeFile.size > 4 * 1024 * 1024) {
@@ -802,12 +855,14 @@ async function submitUploadSareeLegacy(form) {
     showUploadProgress("Validating images...", 0);
     validateUploadImageFile(sareeFile, "Saree Image");
     if (blouseFile) validateUploadImageFile(blouseFile, "Blouse Image");
+    if (palluFile) validateUploadImageFile(palluFile, "Pallu Image");
+    if (borderFile) validateUploadImageFile(borderFile, "Border Image");
     uploadSareeState.isUploading = true;
     uploadSareeState.uploadCancelled = false;
     uploadSareeState.uploadTimedOut = false;
     uploadSareeState.uploadAbortController = new AbortController();
     uploadSareeState.uploadedBlobPaths = [];
-    uploadSareeState.fileProgress = { saree: 0, blouse: 0 };
+    uploadSareeState.fileProgress = { saree: 0, blouse: 0, pallu: 0, border: 0 };
     uploadSareeState.submitting = true;
     setUploadControlsDisabled(true);
     setUploadMessage("Uploading...");
@@ -845,6 +900,8 @@ async function submitUploadSareeLegacy(form) {
 async function submitUploadSareeDirect(form) {
   const sareeFile = form.elements.sareeImage.files[0];
   const blouseFile = form.elements.blouseImage.files[0] || null;
+  const palluFile = form.elements.palluImage.files[0] || null;
+  const borderFile = form.elements.borderImage.files[0] || null;
   const submitBtn = document.getElementById("uploadSubmitBtn");
 
   try {
@@ -854,22 +911,28 @@ async function submitUploadSareeDirect(form) {
     showUploadProgress("Validating images...", 0);
     validateUploadImageFile(sareeFile, "Saree Image");
     if (blouseFile) validateUploadImageFile(blouseFile, "Blouse Image");
+    if (palluFile) validateUploadImageFile(palluFile, "Pallu Image");
+    if (borderFile) validateUploadImageFile(borderFile, "Border Image");
 
     uploadSareeState.isUploading = true;
     uploadSareeState.uploadCancelled = false;
     uploadSareeState.uploadTimedOut = false;
     uploadSareeState.uploadAbortController = new AbortController();
     uploadSareeState.uploadedBlobPaths = [];
-    uploadSareeState.fileProgress = { saree: 0, blouse: 0 };
+    uploadSareeState.fileProgress = { saree: 0, blouse: 0, pallu: 0, border: 0 };
     uploadSareeState.submitting = true;
     setUploadControlsDisabled(true);
 
     showUploadProgress("Preparing secure upload...", 0);
     const uploaded = {};
-    for (const item of [
-      { role: "saree", file: sareeFile },
-      { role: "blouse", file: blouseFile },
-    ]) {
+    const uploadItems = [
+      { role: "saree", label: "Saree Image", file: sareeFile, required: true },
+      { role: "blouse", label: "Blouse Image", file: blouseFile, required: false },
+      { role: "pallu", label: "Pallu Image", file: palluFile, required: false },
+      { role: "border", label: "Border Image", file: borderFile, required: false },
+    ];
+    const uploadFiles = { saree: sareeFile, blouse: blouseFile, pallu: palluFile, border: borderFile };
+    for (const item of uploadItems) {
       if (!item.file) continue;
       if (uploadSareeState.uploadCancelled) {
         throw new DOMException("Upload cancelled.", "AbortError");
@@ -889,8 +952,8 @@ async function submitUploadSareeDirect(form) {
           signal: uploadSareeState.uploadAbortController.signal,
           onProgress: (progress) => {
             uploadSareeState.fileProgress[item.role] = progress.percentage;
-            const totalPercent = calculateTotalUploadProgress({ saree: sareeFile, blouse: blouseFile }, uploadSareeState.fileProgress);
-            showUploadProgress(`Uploading ${item.role === "saree" ? "Saree Image" : "Blouse Image"}: ${progress.percentage}%`, totalPercent);
+            const totalPercent = calculateTotalUploadProgress(uploadFiles, uploadSareeState.fileProgress);
+            showUploadProgress(`Uploading ${item.label}: ${progress.percentage}%`, totalPercent);
           },
         });
       } finally {
@@ -914,6 +977,7 @@ async function submitUploadSareeDirect(form) {
         productCode: getUploadInputValue(form, "productCode"),
         category: getUploadInputValue(form, "category"),
         price: getUploadInputValue(form, "price"),
+        descriptions: getUploadInputValue(form, "descriptions"),
         commentNotes: getUploadInputValue(form, "commentNotes"),
         files: uploaded,
       }),
@@ -1143,6 +1207,15 @@ function stopUploadAutoSync() {
 }
 
 function clearUploadFilePreviews() {
+  Object.values(uploadSareeState.previewUrls || {}).forEach((url) => {
+    if (url) URL.revokeObjectURL(url);
+  });
+  uploadSareeState.sareeFile = null;
+  uploadSareeState.blouseFile = null;
+  uploadSareeState.palluFile = null;
+  uploadSareeState.borderFile = null;
+  uploadSareeState.previewUrls = { saree: null, blouse: null, pallu: null, border: null };
+  uploadSareeState.fileProgress = { saree: 0, blouse: 0, pallu: 0, border: 0 };
   document.querySelectorAll(".upload-file-preview").forEach((preview) => {
     preview.innerHTML = "";
   });
@@ -1224,11 +1297,30 @@ function renderUploadFilePreview(input) {
   const label = input.closest(".upload-file");
   const preview = label?.querySelector(".upload-file-preview");
   const file = input.files?.[0];
+  const roleByInputName = {
+    sareeImage: "saree",
+    blouseImage: "blouse",
+    palluImage: "pallu",
+    borderImage: "border",
+  };
+  const stateFileKeyByRole = {
+    saree: "sareeFile",
+    blouse: "blouseFile",
+    pallu: "palluFile",
+    border: "borderFile",
+  };
+  const role = roleByInputName[input.name];
   if (!preview) return;
+  if (role && uploadSareeState.previewUrls[role]) {
+    URL.revokeObjectURL(uploadSareeState.previewUrls[role]);
+    uploadSareeState.previewUrls[role] = null;
+  }
+  if (role) uploadSareeState[stateFileKeyByRole[role]] = file || null;
   preview.innerHTML = "";
   if (!file) return;
 
   const url = URL.createObjectURL(file);
+  if (role) uploadSareeState.previewUrls[role] = url;
   const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
   preview.innerHTML = `
     <div class="upload-selected-file">
@@ -1245,6 +1337,10 @@ function renderUploadFilePreview(input) {
     input.value = "";
     preview.innerHTML = "";
     URL.revokeObjectURL(url);
+    if (role) {
+      uploadSareeState.previewUrls[role] = null;
+      uploadSareeState[stateFileKeyByRole[role]] = null;
+    }
   });
 }
 
