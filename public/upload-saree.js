@@ -111,12 +111,33 @@ function uploadDisplay(value, fallback) {
   return text || fallback;
 }
 
-function uploadStatusText(row) {
-  return uploadDisplay(row?.generationStatus, "Start");
+function uploadGenerationStatusValue(row = {}) {
+  return row.generationStatus
+    ?? row.status
+    ?? row["Generation Status"]
+    ?? row.field_9535471;
 }
 
-function uploadIsPending(row) {
-  return uploadStatusText(row).toLowerCase() === "pending";
+function normalizeUploadGenerationStatus(value) {
+  if (value && typeof value === "object" && value.value !== undefined) {
+    return String(value.value).trim().toLowerCase();
+  }
+  return String(value || "").trim().toLowerCase();
+}
+
+function shouldShowUploadRow(row) {
+  const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
+  return status === "start" || status === "pending";
+}
+
+function canApproveUploadRow(row) {
+  return normalizeUploadGenerationStatus(uploadGenerationStatusValue(row)) === "pending";
+}
+
+function uploadStatusText(row) {
+  const value = uploadGenerationStatusValue(row);
+  const displayValue = value && typeof value === "object" && value.value !== undefined ? value.value : value;
+  return uploadDisplay(displayValue, "Start");
 }
 
 function hasUploadImage(url) {
@@ -124,9 +145,9 @@ function hasUploadImage(url) {
 }
 
 function getUploadMainImage(row) {
-  const status = String(row?.generationStatus || row?.status || "").trim().toLowerCase();
+  const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
   const images = row?.images || {};
-  if ((status === "pending" || status === "approved") && hasUploadImage(images.front)) {
+  if (status === "pending" && hasUploadImage(images.front)) {
     return { url: images.front, type: "generated", label: "Front View" };
   }
   if (hasUploadImage(images.front)) return { url: images.front, type: "generated", label: "Front View" };
@@ -185,7 +206,7 @@ function preloadUploadImage(url) {
 }
 
 function stableUploadRowsSignature(rows) {
-  return JSON.stringify((rows || []).map((row) => ({
+  return JSON.stringify((rows || []).filter(shouldShowUploadRow).map((row) => ({
     rowId: row.rowId,
     status: row.generationStatus || row.status || "",
     saree: row.images?.saree || "",
@@ -294,7 +315,7 @@ async function uploadApiCall(url, options = {}, retryAuth = true) {
 }
 
 function uploadStatusClass(status) {
-  const value = String(status || "").toLowerCase();
+  const value = normalizeUploadGenerationStatus(status);
   if (value.includes("approved")) return "approved";
   if (value.includes("failed") || value.includes("reject")) return "failed";
   if (value.includes("pending")) return "pending";
@@ -302,7 +323,7 @@ function uploadStatusClass(status) {
 }
 
 function currentUploadRow() {
-  return uploadSareeState.rows.filter(isVisibleUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
+  return uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
 }
 
 function setUploadMessage(message, isError = false) {
@@ -476,12 +497,6 @@ function cancelUploadSaree() {
   uploadSareeState.uploadAbortController?.abort();
 }
 
-function isVisibleUploadRow(row) {
-  const rawStatus = row?.generationStatus || row?.status || "";
-  const status = rawStatus && typeof rawStatus === "object" && rawStatus.value ? rawStatus.value : rawStatus;
-  return !["failed", "reject", "rejected"].includes(String(status).trim().toLowerCase());
-}
-
 async function loadUploadStatus() {
   const panel = document.getElementById("uploadStatusPanel");
   try {
@@ -541,7 +556,7 @@ async function loadRecentUploadSarees(options = {}) {
       : Array.isArray(data.uploads)
         ? data.uploads
         : [];
-    const nextRows = rawRows.filter(isVisibleUploadRow);
+    const nextRows = rawRows.filter(shouldShowUploadRow);
 
     const nextSignature = stableUploadRowsSignature(nextRows);
     if (uploadSareeState.lastRowsSignature !== nextSignature) {
@@ -552,7 +567,7 @@ async function loadRecentUploadSarees(options = {}) {
     updateUploadSyncTime();
 
     if (preserveDetail && uploadSareeState.detailOpen && uploadSareeState.currentRowId) {
-      const updatedRow = uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
+      const updatedRow = uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
       if (updatedRow) {
         uploadSareeState.selectedRowId = updatedRow.rowId;
         const nextDetailSignature = getUploadDetailSignature(updatedRow);
@@ -560,6 +575,9 @@ async function loadRecentUploadSarees(options = {}) {
           uploadSareeState.currentDetailSignature = nextDetailSignature;
           renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
         }
+      } else {
+        closeUploadImageFullscreen();
+        closeUploadDetail();
       }
     }
 
@@ -584,7 +602,7 @@ async function syncUploadSareesNow() {
 function renderUploadRows() {
   const root = document.getElementById("uploadRecentRows");
   const count = document.getElementById("uploadRecentCount");
-  const visibleRows = uploadSareeState.rows.filter(isVisibleUploadRow);
+  const visibleRows = uploadSareeState.rows.filter(shouldShowUploadRow);
   count.textContent = `${visibleRows.length} rows`;
 
   if (!visibleRows.length) {
@@ -595,7 +613,7 @@ function renderUploadRows() {
   root.innerHTML = visibleRows.map((row) => {
     const status = uploadStatusText(row);
     const statusClass = uploadStatusClass(status);
-    const approveDisabled = uploadIsPending(row) ? "" : "disabled";
+    const approveDisabled = canApproveUploadRow(row) ? "" : "disabled";
     const mainImage = getUploadMainImage(row);
     const referenceThumbs = [
       { key: "saree", label: "Saree", url: row.images?.saree },
@@ -696,7 +714,7 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   renderUploadGeneratedStage(row, selected.key, getUploadGeneratedImage(row, selected.key));
 
   const approveBtn = document.getElementById("uploadApproveBtn");
-  const approveEnabled = uploadIsPending(row);
+  const approveEnabled = canApproveUploadRow(row);
   approveBtn.disabled = !approveEnabled;
   approveBtn.title = approveEnabled ? "Approve generated output" : "Approve is enabled only when Generation Status is Pending";
   const sheetApproveBtn = document.getElementById("uploadApproveButton");
@@ -710,7 +728,7 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
 }
 
 function openUploadDetail(rowId) {
-  const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(rowId));
+  const row = uploadSareeState.rows.filter(shouldShowUploadRow).find((item) => Number(item.rowId) === Number(rowId));
   if (!row) return;
   uploadSareeState.detailOpen = true;
   uploadSareeState.currentRowId = rowId;
@@ -801,14 +819,14 @@ function renderUploadGeneratedStage(row, key, url) {
 }
 
 function getCurrentUploadGeneratedUrl() {
-  const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(uploadSareeState.currentRowId));
+  const row = uploadSareeState.rows.filter(shouldShowUploadRow).find((item) => Number(item.rowId) === Number(uploadSareeState.currentRowId));
   if (!row) return "";
   const key = uploadSareeState.selectedGeneratedKey || "front";
   return getUploadGeneratedImage(row, key);
 }
 
 function getCurrentUploadRow() {
-  return uploadSareeState.rows.find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId)) || null;
+  return uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId)) || null;
 }
 
 function openUploadImageFullscreen(event) {
@@ -1081,7 +1099,7 @@ async function submitUploadSareeDirect(form) {
 
 function setUploadActionLoading(loading) {
   const row = currentUploadRow();
-  const approveAllowed = uploadIsPending(row);
+  const approveAllowed = canApproveUploadRow(row);
   [
     "uploadRejectButton",
     "uploadRequestChangesButton",
@@ -1104,7 +1122,7 @@ async function updateUploadStatus(action, event) {
     return;
   }
 
-  if (action === "approve" && !uploadIsPending(row)) {
+  if (action === "approve" && !canApproveUploadRow(row)) {
     showUploadToast("Only Pending rows can be approved.", true);
     return;
   }
@@ -1117,37 +1135,31 @@ async function updateUploadStatus(action, event) {
 
   setUploadActionLoading(true);
   try {
+    const completedRowId = row.rowId;
     await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ feedback, comment: feedback, note: feedback }),
     });
     closeUploadReviewActions();
-    if (action === "reject" || action === "request-changes") {
-      closeUploadImageFullscreen();
-      closeUploadDetail();
-      uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(row.rowId));
-      uploadSareeState.lastRowsSignature = "";
-      renderUploadRows();
-      await loadRecentUploadSarees({ force: true, preserveDetail: false, silent: true });
-    } else {
-      await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
-      const updatedRow = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(row.rowId));
-      if (updatedRow) {
-        uploadSareeState.selectedRowId = updatedRow.rowId;
-        uploadSareeState.currentDetailSignature = getUploadDetailSignature(updatedRow);
-        renderUploadDetail(updatedRow, { keepOpen: true, preserveGeneratedKey: true });
-      }
-    }
+    closeUploadImageFullscreen();
+    closeUploadDetail();
+    uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(completedRowId));
+    uploadSareeState.lastRowsSignature = "";
+    renderUploadRows();
     showUploadToast(action === "approve"
-      ? "Approved successfully."
+      ? "Saree approved successfully. Status changed to Completed."
       : action === "reject"
         ? "Rejected successfully."
         : "Changes requested successfully.");
+    await loadRecentUploadSarees({ force: true, preserveDetail: false, silent: true });
   } catch (error) {
     console.error(`Upload ${action} failed:`, error);
-    setUploadMessage(error.message, true);
-    showUploadToast(error.message || `${action} failed.`, true);
+    const message = action === "approve" && error.message !== "The Completed status is not configured in the Upload Saree Baserow table."
+      ? "Unable to approve the saree. Generation Status was not updated."
+      : error.message || `${action} failed.`;
+    setUploadMessage(message, true);
+    showUploadToast(message, true);
   } finally {
     setUploadActionLoading(false);
   }

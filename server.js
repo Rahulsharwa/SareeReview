@@ -65,9 +65,10 @@ const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_E
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v4";
+const UPLOAD_SAREE_CACHE_VERSION = "v5";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
+const UPLOAD_RECENT_CACHE_KEY_V4 = `${CACHE_PREFIX}upload-saree:recent:v4`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
 const UPLOAD_RECENT_CACHE_TTL_SECONDS = 60;
 const UPLOAD_IMAGE_MIME_TYPES = new Set(
@@ -96,7 +97,7 @@ const UPLOAD_FIELDS = {
 };
 const UPLOAD_GENERATION_STATUS = {
   start: process.env.UPLOAD_GENERATION_STATUS_START || "Start",
-  approved: process.env.UPLOAD_GENERATION_STATUS_APPROVED || "Approved",
+  completed: process.env.UPLOAD_GENERATION_STATUS_COMPLETED || "Completed",
   failed: process.env.UPLOAD_GENERATION_STATUS_FAILED || "Failed",
 };
 
@@ -1917,14 +1918,21 @@ function validateUploadBlobPathname(pathname, role = "") {
   return value;
 }
 
-function normalizeUploadStatus(value) {
-  if (!value) return "";
-  if (typeof value === "object" && value.value) return String(value.value).trim().toLowerCase();
-  return String(value).trim().toLowerCase();
+function normalizeUploadGenerationStatus(value) {
+  if (value && typeof value === "object" && value.value !== undefined) {
+    return String(value.value).trim().toLowerCase();
+  }
+  return String(value || "").trim().toLowerCase();
 }
 
-function isHiddenUploadStatus(value) {
-  return ["failed", "reject", "rejected"].includes(normalizeUploadStatus(value));
+function shouldShowUploadRow(row = {}) {
+  const status = normalizeUploadGenerationStatus(
+    row.generationStatus
+      ?? row.status
+      ?? row["Generation Status"]
+      ?? row[uploadFieldKey("generationStatus")],
+  );
+  return status === "start" || status === "pending";
 }
 
 function validateUploadFileDescriptor(file, role) {
@@ -2114,7 +2122,7 @@ async function fetchRecentUploadSarees({ refresh = false } = {}) {
   });
   const data = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`);
   const rawRows = Array.isArray(data.results) ? data.results : [];
-  const visibleRows = rawRows.filter((row) => !isHiddenUploadStatus(readUploadField(row, "generationStatus")));
+  const visibleRows = rawRows.filter(shouldShowUploadRow);
   const rows = visibleRows.length
     ? visibleRows
       .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
@@ -2124,7 +2132,7 @@ async function fetchRecentUploadSarees({ refresh = false } = {}) {
     ok: true,
     rows,
     totalFetched: rawRows.length,
-    hiddenFailed: rawRows.length - visibleRows.length,
+    hiddenRows: rawRows.length - visibleRows.length,
     visibleCount: rows.length,
     cache: { provider: cacheProvider(), ttlSeconds: UPLOAD_RECENT_CACHE_TTL_SECONDS, status: "miss" },
   };
@@ -2163,15 +2171,26 @@ function buildUploadCreatePayload({
 
 async function clearUploadCache() {
   await cacheDelete(UPLOAD_RECENT_CACHE_KEY);
+  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V4);
   await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V2);
   await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V1);
 }
 
-async function patchUploadSareeStatus(rowId, status, feedback = "") {
+async function patchUploadSareeStatus(rowId, status, feedback = "", { requiredCurrentStatus = "" } = {}) {
   if (!/^\d+$/.test(String(rowId || ""))) {
     const error = new Error("Invalid upload rowId.");
     error.status = 400;
     throw error;
+  }
+  if (requiredCurrentStatus) {
+    const current = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/${rowId}/?user_field_names=false`);
+    const currentStatus = normalizeUploadGenerationStatus(readUploadField(current, "generationStatus"));
+    if (currentStatus !== normalizeUploadGenerationStatus(requiredCurrentStatus)) {
+      const error = new Error("Only Pending upload rows can be approved.");
+      error.status = 409;
+      error.code = "UPLOAD_NOT_PENDING";
+      throw error;
+    }
   }
   const updated = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/${rowId}/?user_field_names=false`, {
     method: "PATCH",
@@ -2179,6 +2198,12 @@ async function patchUploadSareeStatus(rowId, status, feedback = "") {
   });
   await clearUploadCache();
   return normalizeUploadRow(updated);
+}
+
+function isCompletedStatusConfigurationError(error) {
+  if (Number(error?.status) !== 400) return false;
+  const detail = `${error?.message || ""} ${JSON.stringify(error?.baserow || {})}`.toLowerCase();
+  return detail.includes("completed") && (detail.includes("select") || detail.includes("option") || detail.includes("valid"));
 }
 
 function buildApprovePayload(tableConfig) {
@@ -3158,10 +3183,24 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
 
 app.patch("/api/upload-saree/:rowId/approve", requireSocialReviewAuth, async (req, res) => {
   try {
-    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.approved);
-    res.json({ ok: true, rowId: Number(req.params.rowId), status: UPLOAD_GENERATION_STATUS.approved, hiddenFromDashboard: false, row });
+    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.completed, "", {
+      requiredCurrentStatus: "Pending",
+    });
+    res.json({
+      ok: true,
+      rowId: Number(req.params.rowId),
+      status: UPLOAD_GENERATION_STATUS.completed,
+      generationStatus: UPLOAD_GENERATION_STATUS.completed,
+      hiddenFromDashboard: true,
+      row,
+    });
   } catch (error) {
-    res.status(error.status || 500).json({ ok: false, error: error.status === 400 ? error.message : "Unable to approve uploaded saree." });
+    const message = error?.code === "UPLOAD_NOT_PENDING"
+      ? "Only Pending upload rows can be approved."
+      : isCompletedStatusConfigurationError(error)
+        ? "The Completed status is not configured in the Upload Saree Baserow table."
+        : "Unable to approve the saree. Generation Status was not updated.";
+    res.status(error.status || 500).json({ ok: false, error: message });
   }
 });
 
