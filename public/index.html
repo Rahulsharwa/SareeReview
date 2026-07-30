@@ -518,9 +518,13 @@
       flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 14px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: thin;
     }
 
     .mini-tab {
+      flex: 0 0 auto;
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 9px 13px;
@@ -528,6 +532,7 @@
       color: var(--text);
       font-size: 13px;
       font-weight: 850;
+      white-space: nowrap;
     }
 
     .mini-tab.active { background: var(--maroon); color: white; border-color: var(--gold); }
@@ -1162,8 +1167,13 @@
       .compare-grid, .modal-grid { grid-template-columns: 1fr; }
       .hero-preview, .compare-img { height: 330px; }
       .thumb-strip { grid-template-columns: repeat(3, 1fr); }
-      .generated-thumb-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .generated-thumb-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .generated-thumb-media { height: 76px; }
+      .generated-thumb-label {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-overflow: clip;
+      }
       .mini-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
       .mini-tab { white-space: nowrap; }
       .action-bar { grid-template-columns: 1fr 1fr; }
@@ -2159,7 +2169,10 @@
       if (q) {
         list = list.filter(p =>
           String(p.code || '').toLowerCase().includes(q) ||
-          String(p.title || '').toLowerCase().includes(q)
+          String(p.title || '').toLowerCase().includes(q) ||
+          String(p.collectionName || '').toLowerCase().includes(q) ||
+          String(p.displayName || '').toLowerCase().includes(q) ||
+          String(p.subcategory || '').toLowerCase().includes(q)
         );
       }
 
@@ -2254,6 +2267,14 @@
       return product?.images?.grid || product?.images?.front || product?.images?.full || null;
     }
 
+    function cardMediaForProduct(product) {
+      if (Array.isArray(product?.cardMedia)) {
+        return product.cardMedia.filter(item => item && item.url);
+      }
+      const generated = availableGenerated(product);
+      return generated.length ? generated : availableReference(product);
+    }
+
     function renderCategories() {
       const tabs = document.getElementById('categoryTabs');
       const sel = document.getElementById('categorySelect');
@@ -2292,8 +2313,7 @@
       const grid = document.getElementById('gridView');
       const list = filteredProducts();
       grid.innerHTML = list.map(p => {
-        const generatedItems = availableGenerated(p);
-        const thumbnailItems = generatedItems.length ? generatedItems : availableReference(p);
+        const thumbnailItems = cardMediaForProduct(p);
         return `
           <article class="product-card">
             <div class="card-img zoom-wrap">${makeZoomable(productPreviewUrl(p), p.title)}</div>
@@ -2356,7 +2376,7 @@
       const available = availableGenerated(p);
       if (!available.length) {
         tabs.innerHTML = '';
-        hero.innerHTML = '<div class="empty-img">No generated output available</div>';
+        hero.innerHTML = `<div class="empty-img">${p.generatedEmptyMessage || 'No generated output available'}</div>`;
         strip.innerHTML = '';
         return;
       }
@@ -2382,7 +2402,7 @@
       const grid = document.getElementById('referenceGrid');
       const refs = referenceMediaForProduct(p);
       if (!refs.length) {
-        grid.innerHTML = '<div class="panel" style="grid-column:1/-1;text-align:center;padding:30px;"><p class="card-muted">No reference images available for this category.</p></div>';
+        grid.innerHTML = `<div class="panel" style="grid-column:1/-1;text-align:center;padding:30px;"><p class="card-muted">${p.referenceEmptyMessage || 'No reference images available for this category.'}</p></div>`;
         return;
       }
       grid.innerHTML = refs.map(ref => `
@@ -2416,8 +2436,8 @@
       const genSrc = selected ? (selected.url || p.images?.[selected.key]) : null;
       document.getElementById('compareRefTitle').textContent = selectedRef ? `Reference - ${selectedRef.label}` : 'Reference';
       document.getElementById('compareGenTitle').textContent = selected ? `Generated - ${selected.label}` : 'Generated Output';
-      document.getElementById('compareRef').innerHTML = selectedRef ? renderMediaPreview(refSrc, `Reference ${selectedRef.label}`, selectedRef.type) : '<div class="empty-img">No reference media available.</div>';
-      document.getElementById('compareGen').innerHTML = selected ? makeMedia(genSrc, `Generated ${selected.label}`, selected.type) : '<div class="empty-img">No generated output available</div>';
+      document.getElementById('compareRef').innerHTML = selectedRef ? renderMediaPreview(refSrc, `Reference ${selectedRef.label}`, selectedRef.type) : `<div class="empty-img">${p.referenceEmptyMessage || 'No reference media available.'}</div>`;
+      document.getElementById('compareGen').innerHTML = selected ? makeMedia(genSrc, `Generated ${selected.label}`, selected.type) : `<div class="empty-img">${p.generatedEmptyMessage || 'No generated output available'}</div>`;
     }
 
     function renderMobile(p) {
@@ -2429,12 +2449,12 @@
           <div class="phone-top"><button class="icon-btn" type="button" style="width:38px;height:38px;">☰</button><div class="phone-title">Janardhana<br>Saree Review</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
           <div class="phone-tabs">${SAREE_TABLES.slice(1,5).map((table,i)=>`<span class="tab ${i===0?'active':''}">${table.name.split(' ')[0]}<span class="count">${collectionCounts.get(String(table.tableId)) || 0}</span></span>`).join('')}</div>
           <div class="phone-card"><strong>${p.code}</strong><br>${p.title}<br><span class="price">${formatPrice(p.price)}</span><br><span class="badge">${p.generationStatus}</span></div>
-          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;">${generated.map((item, index) => `<button class="mini-tab ${index === 0 ? 'active' : ''}" type="button">${item.label}</button>`).join('')}</div><div class="phone-hero zoom-wrap">${makeMedia(selectedMobileGenerated?.url, selectedMobileGenerated?.label || 'Mobile generated preview', selectedMobileGenerated?.type)}</div></div>
+          <div class="phone-card"><strong>Generated Output</strong><div class="mini-tabs" style="margin-top:10px;">${generated.map((item, index) => `<button class="mini-tab ${index === 0 ? 'active' : ''}" type="button">${item.label}</button>`).join('')}</div><div class="phone-hero zoom-wrap">${selectedMobileGenerated ? makeMedia(selectedMobileGenerated.url, selectedMobileGenerated.label, selectedMobileGenerated.type) : `<div class="empty-img">${p.generatedEmptyMessage || 'No generated output available'}</div>`}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button></div>
         </div>
         <div class="phone">
           <div class="phone-top"><button class="icon-btn" type="button" style="width:38px;height:38px;">☰</button><div class="phone-title">Reference Images</div><div class="avatar" style="width:38px;height:38px;font-size:12px;">AM</div></div>
-          <div class="phone-card"><div class="phone-ref">${refs.length ? refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(ref.url || p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('') : '<div class="empty-img">No reference images available for this category.</div>'}</div></div>
+          <div class="phone-card"><div class="phone-ref">${refs.length ? refs.map(ref => `<div class="ref-card"><div class="ref-img zoom-wrap">${renderMediaPreview(ref.url || p.images?.[ref.key], ref.label, ref.type)}</div><div class="ref-label">${ref.label}</div></div>`).join('') : `<div class="empty-img">${p.referenceEmptyMessage || 'No reference images available for this category.'}</div>`}</div></div>
           <div class="phone-actions"><button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button><button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button></div>
         </div>
       `;

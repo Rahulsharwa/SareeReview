@@ -33,6 +33,8 @@ const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() 
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
 const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${SAREE_BASEROW_DATABASE_ID}:`;
 const CACHE_VERSION = "v4";
+const PRODUCT_MEDIA_CACHE_VERSION = "men-tie-v2";
+const MEN_ACCESSORIES_FIELD_CACHE_VERSION = "men-tie-v2";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
 const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
@@ -212,11 +214,72 @@ const MEDIA_PROFILES = {
     ],
   },
   menAccessory: {
+    referenceEmptyMessage: "Tie Image not available",
+    generatedEmptyMessage: "Generated tie images are not available yet.",
+    cardMediaOrder: [
+      "tie",
+      "rolledTieHero",
+      "diagonalCloseup",
+      "openedBackConstruction",
+      "fullLengthFrontFlatLay",
+    ],
     reference: [
-      { label: "Tie Image", key: "tieImage", type: "image", aliases: ["Tie Image", "field_8133049"] },
+      { label: "Tie Image", key: "tie", fieldId: 8133049, type: "image", aliases: ["Tie Image"] },
     ],
     generated: [
-      { label: "Generated Front View", key: "front", type: "image", aliases: ["Generated Front View", "Front View", "field_8133053"] },
+      {
+        label: "Rolled Tie Hero View",
+        key: "rolledTieHero",
+        fieldId: 9684125,
+        type: "image",
+        aliases: [
+          "Rolled Tie Hero View",
+          "Rolled Hero View",
+          "Tie Rolled Hero View",
+          "Generated Rolled Tie Hero View",
+          "Generated Front View",
+        ],
+      },
+      {
+        label: "Diagonal Close-Up Detail View",
+        key: "diagonalCloseup",
+        fieldId: 9684126,
+        type: "image",
+        aliases: [
+          "Diagonal Close-Up Detail View",
+          "Diagonal Close Up Detail View",
+          "Diagonal Closeup Detail View",
+          "Diagonal Close-Up View",
+          "Diagonal Close Up View",
+        ],
+      },
+      {
+        label: "Opened Back Construction View",
+        key: "openedBackConstruction",
+        fieldId: 9684127,
+        type: "image",
+        aliases: [
+          "Opened Back Construction View",
+          "Opened Back Construction",
+          "Back Construction View",
+          "Reverse-Side Construction Flat-Lay View",
+          "Reverse Side Construction Flat Lay View",
+        ],
+      },
+      {
+        label: "Full-Length Front Flat-Lay View",
+        key: "fullLengthFrontFlatLay",
+        fieldId: 9684129,
+        type: "image",
+        aliases: [
+          "Full-Length Front Flat-Lay View",
+          "Full Length Front Flat Lay View",
+          "Full-Length Front Flatlay View",
+          "Full Length Front Flatlay View",
+          "Full-Length Flat-Lay View",
+          "Full Length Flat Lay View",
+        ],
+      },
     ],
   },
   dupatta: {
@@ -714,10 +777,10 @@ function stableQueryKey(query) {
 }
 
 function productCacheKey(query = {}) {
-  if (query.tableId) return cacheKey("products", "table", query.tableId);
-  if (query.collection) return cacheKey("products", "collection", normalizeLookupName(query.collection));
-  if (query.group) return cacheKey("products", "group", normalizeLookupName(query.group));
-  return cacheKey("products", "all");
+  if (query.tableId) return cacheKey("products", "table", query.tableId, PRODUCT_MEDIA_CACHE_VERSION);
+  if (query.collection) return cacheKey("products", "collection", normalizeLookupName(query.collection), PRODUCT_MEDIA_CACHE_VERSION);
+  if (query.group) return cacheKey("products", "group", normalizeLookupName(query.group), PRODUCT_MEDIA_CACHE_VERSION);
+  return cacheKey("products", "all", PRODUCT_MEDIA_CACHE_VERSION);
 }
 
 function getMemoryCache(key) {
@@ -1082,7 +1145,9 @@ async function fetchFieldMap(tableId) {
     return fieldMapCache.get(String(tableId));
   }
 
-  const fieldsCacheKey = cacheKey("fields", "table", tableId);
+  const fieldsCacheKey = Number(tableId) === 936098
+    ? cacheKey("fields", "table", tableId, MEN_ACCESSORIES_FIELD_CACHE_VERSION)
+    : cacheKey("fields", "table", tableId);
   const cachedFields = await cacheGet(fieldsCacheKey);
   if (Array.isArray(cachedFields)) {
     const fieldMap = {
@@ -1139,15 +1204,30 @@ function findFieldByAliases(fieldMap, aliases) {
   return field ? { id: field.id, name: field.name, type: field.type } : null;
 }
 
+function mediaAliases(mediaDef) {
+  return [
+    ...(mediaDef?.fieldId ? [`field_${mediaDef.fieldId}`] : []),
+    ...(mediaDef?.aliases || []),
+  ];
+}
+
+function resolveMediaField(fieldMap, mediaDef) {
+  if (mediaDef?.fieldId) {
+    const configured = fieldMap?.fields?.find((field) => Number(field.id) === Number(mediaDef.fieldId));
+    if (configured) return { id: configured.id, name: configured.name, type: configured.type };
+  }
+  return findFieldByAliases(fieldMap, mediaAliases(mediaDef));
+}
+
 function detectMediaFields(fieldMap) {
   const allGenerated = Object.fromEntries(
     Object.entries(MEDIA_PROFILES).flatMap(([, profile]) =>
-      profile.generated.map((item) => [item.key, item.aliases])
+      profile.generated.map((item) => [item.key, mediaAliases(item)])
     )
   );
   const allReference = Object.fromEntries(
     Object.entries(MEDIA_PROFILES).flatMap(([, profile]) =>
-      profile.reference.map((item) => [item.key, item.aliases])
+      profile.reference.map((item) => [item.key, mediaAliases(item)])
     )
   );
 
@@ -1183,17 +1263,20 @@ function mediaFieldDetection(rows, tableConfig, fieldMap, type) {
   const namedRows = rows.map((row) => rowWithFieldNames(row, fieldMap?.fields || []));
 
   return (profile[type] || []).map((mediaDef) => {
-    const foundField = findFieldByAliases(fieldMap, mediaDef.aliases || []);
+    const aliases = mediaAliases(mediaDef);
+    const foundField = resolveMediaField(fieldMap, mediaDef);
     const count = namedRows.reduce((sum, namedRow) => {
-      const rawValue = getByNormalizedAliases(namedRow, mediaDef.aliases || []);
+      const rawValue = getByNormalizedAliases(namedRow, aliases);
       return sum + (mediaDef.multiple ? getFileUrls(rawValue).length : (getFileUrl(rawValue) ? 1 : 0));
     }, 0);
 
     return {
       label: mediaDef.label,
-      aliases: mediaDef.aliases || [],
+      configuredFieldId: mediaDef.fieldId || null,
+      aliases,
       foundFieldName: foundField?.name || null,
       foundFieldId: foundField?.id || null,
+      resolved: Boolean(foundField),
       count,
     };
   });
@@ -1311,7 +1394,7 @@ function buildMediaArray(namedRow, mediaDefs) {
   const output = [];
 
   for (const mediaDef of mediaDefs || []) {
-    const rawValue = getByNormalizedAliases(namedRow, mediaDef.aliases || []);
+    const rawValue = getByNormalizedAliases(namedRow, mediaAliases(mediaDef));
 
     if (mediaDef.multiple) {
       const urls = getFileUrls(rawValue);
@@ -1418,6 +1501,11 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
   const namedRow = rowWithFieldNames(row, fieldMap?.fields || []);
   const generatedMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "generated");
   const referenceMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "reference");
+  const mediaProfile = mediaProfileFor(tableConfig);
+  const mediaByKey = new Map([...referenceMedia, ...generatedMedia].map((item) => [item.key, item]));
+  const cardMedia = Array.isArray(mediaProfile.cardMediaOrder)
+    ? mediaProfile.cardMediaOrder.map((key) => mediaByKey.get(key)).filter(Boolean)
+    : null;
   const images = {};
   [...referenceMedia, ...generatedMedia].forEach((item) => {
     images[item.key] = item.url;
@@ -1436,6 +1524,8 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
     group: tableConfig.group,
     subcategory: tableConfig.subcategory,
     mediaProfile: tableConfig.mediaProfile,
+    referenceEmptyMessage: mediaProfile.referenceEmptyMessage,
+    generatedEmptyMessage: mediaProfile.generatedEmptyMessage,
     code: readField(row, null, "Product Code", fieldMap) || readField(row, null, "SKU", fieldMap) || readField(row, null, "Product SKU", fieldMap) || `ROW-${row.id}`,
     title: readField(row, null, "Product Title", fieldMap) || readField(row, null, "Title", fieldMap) || `Untitled ${tableConfig.displayName}`,
     category: getSelectValue(readField(row, null, "Category", fieldMap)) || tableConfig.name,
@@ -1456,6 +1546,7 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
     images,
     generatedMedia,
     referenceMedia,
+    cardMedia,
   };
 }
 
@@ -1476,7 +1567,10 @@ function applyProductFilters(products, { search, status, sort }) {
     const q = String(search).toLowerCase();
     filtered = filtered.filter((product) =>
       String(product.code || "").toLowerCase().includes(q) ||
-      String(product.title || "").toLowerCase().includes(q)
+      String(product.title || "").toLowerCase().includes(q) ||
+      String(product.collectionName || "").toLowerCase().includes(q) ||
+      String(product.displayName || "").toLowerCase().includes(q) ||
+      String(product.subcategory || "").toLowerCase().includes(q)
     );
   }
 
@@ -1528,7 +1622,7 @@ async function fetchBaserowRows(tableId) {
 
 async function fetchApprovedForTable(tableConfig, options = {}) {
   const { force = false } = options;
-  const visibleCacheKey = cacheKey("products", "table-visible", tableConfig.tableId);
+  const visibleCacheKey = cacheKey("products", "table-visible", tableConfig.tableId, PRODUCT_MEDIA_CACHE_VERSION);
   const cached = force ? null : await cacheGet(visibleCacheKey);
   if (cached) {
     return {
