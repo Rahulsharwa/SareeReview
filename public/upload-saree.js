@@ -71,27 +71,6 @@ const UPLOAD_GENERATED_TABS = [
   { key: "closeUp", label: "Close-Up" },
 ];
 
-const UPLOAD_SAREE_CATEGORIES = [
-  "Kanjivaram Silks",
-  "Pure Silk Sarees",
-  "Tussar Silk Saree",
-  "South Weaves \u2013 South Silk Sarees",
-  "Soft Silk Sarees",
-  "Patola & Orissa Silk Sarees",
-  "Printed Pure Silk Sarees",
-  "Cotton Silk Sarees",
-  "Paithani Silk Sarees",
-  "Banarasi Silk Sarees",
-  "Banarasi Georgette Silk Sarees",
-  "Banarasi Kora Silk Saree",
-  "Gadwal Handloom",
-  "Jamawar Silk Sarees",
-  "Cotton Saree",
-  "Linen & Kota Silk Sarees",
-  "Art Silk Sarees",
-  "Bandhani Silk Saree",
-];
-
 function uploadEscapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -506,6 +485,7 @@ async function loadUploadStatus() {
     uploadSareeState.directStorageEnabled = Boolean(data.directStorageEnabled);
     uploadSareeState.clientTimeoutMs = Number(data.clientTimeoutMs || 900000);
     if (Array.isArray(data.allowedMimeTypes)) uploadSareeState.allowedMimeTypes = data.allowedMimeTypes;
+    populateUploadCategorySelect(data.categoryGroups);
     document.getElementById("uploadMaxSizeText").textContent = `JPG, PNG, WEBP - Max ${uploadSareeState.maxFileSizeMb} MB per image`;
     panel.className = `upload-status ${data.ok ? "ok" : "error"}`;
     panel.textContent = data.ok
@@ -1305,15 +1285,43 @@ function clearUploadFilePreviews() {
   });
 }
 
-function populateUploadCategories() {
+function populateUploadCategorySelect(categoryGroups) {
   const select = document.getElementById("uploadCategory");
-  if (!select || select.options.length > 1) return;
-  UPLOAD_SAREE_CATEGORIES.forEach((category) => {
-    const option = document.createElement("option");
-    option.value = category;
-    option.textContent = category;
-    select.appendChild(option);
+  if (!select || select.dataset.categoriesLoaded === "true" || !Array.isArray(categoryGroups)) return;
+
+  const groups = categoryGroups.filter((group) =>
+    group &&
+    typeof group.label === "string" &&
+    Array.isArray(group.options)
+  );
+  const categories = groups.flatMap((group) => group.options);
+  const normalizedCategories = categories.map((value) => String(value || "").trim().toLowerCase());
+  if (new Set(normalizedCategories).size !== normalizedCategories.length) {
+    console.error("Duplicate upload categories detected.");
+    return;
+  }
+
+  const selectedValue = select.value;
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select category";
+  select.appendChild(placeholder);
+
+  groups.forEach((group) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.label;
+    group.options.forEach((category) => {
+      const option = document.createElement("option");
+      option.value = category;
+      option.textContent = category;
+      optgroup.appendChild(option);
+    });
+    select.appendChild(optgroup);
   });
+
+  if (categories.includes(selectedValue)) select.value = selectedValue;
+  select.dataset.categoriesLoaded = "true";
 }
 
 function enhanceUploadFileInputs() {
@@ -1436,7 +1444,6 @@ function renderUploadRolePreview(role) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  populateUploadCategories();
   const form = document.getElementById("uploadSareeForm");
   if (form) form.addEventListener("submit", submitUploadSaree);
   document.getElementById("uploadCancelButton")?.addEventListener("click", cancelUploadSaree);

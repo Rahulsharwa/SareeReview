@@ -102,6 +102,56 @@ const UPLOAD_GENERATION_STATUS = {
   completed: process.env.UPLOAD_GENERATION_STATUS_COMPLETED || "Completed",
   failed: process.env.UPLOAD_GENERATION_STATUS_FAILED || "Failed",
 };
+const UPLOAD_ASSET_CATEGORY_GROUPS = [
+  {
+    label: "Saree Collections",
+    options: [
+      "Kanjivaram Silks",
+      "Pure Silk Sarees",
+      "Tussar Silk Saree",
+      "South Weaves \u2013 South Silk Sarees",
+      "Soft Silk Sarees",
+      "Patola & Orissa Silk Sarees",
+      "Printed Pure Silk Sarees",
+      "Cotton Silk Sarees",
+      "Paithani Silk Sarees",
+      "Banarasi Silk Sarees",
+      "Banarasi Georgette Silk Sarees",
+      "Banarasi Kora Silk Saree",
+      "Gadwal Handloom",
+      "Jamawar Silk Sarees",
+      "Cotton Saree",
+      "Linen & Kota Silk Sarees",
+      "Art Silk Sarees",
+      "Bandhani Silk Saree",
+    ],
+  },
+  {
+    label: "Salwar Kameez",
+    options: ["Cotton Suits", "Silk Suits"],
+  },
+  {
+    label: "Accessories",
+    options: [
+      "Designer Blouses",
+      "Dhoti",
+      "Men Accessories",
+      "Dupattas",
+      "Shawls",
+      "Silk Scarves",
+      "Silk Stoles",
+    ],
+  },
+  {
+    label: "Fabric",
+    options: ["Fabrics"],
+  },
+];
+const UPLOAD_ASSET_CATEGORIES = UPLOAD_ASSET_CATEGORY_GROUPS.flatMap((group) => group.options);
+const UPLOAD_ASSET_CATEGORY_SET = new Set(UPLOAD_ASSET_CATEGORIES);
+if (UPLOAD_ASSET_CATEGORY_SET.size !== UPLOAD_ASSET_CATEGORIES.length) {
+  throw new Error("Duplicate upload categories detected.");
+}
 
 const SOCIAL_TABLES = {
   Dashboard: 924895,
@@ -1965,6 +2015,8 @@ function getUploadConfigStatus() {
     maxFiles: UPLOAD_MAX_FILES,
     maxUploadFiles: UPLOAD_MAX_FILES,
     allowedMimeTypes: Array.from(UPLOAD_IMAGE_MIME_TYPES),
+    categoryGroups: UPLOAD_ASSET_CATEGORY_GROUPS,
+    categoryCount: UPLOAD_ASSET_CATEGORIES.length,
     directStorageEnabled: UPLOAD_DIRECT_STORAGE_ENABLED,
     blobConfigured: UPLOAD_BLOB_CONFIGURED,
     referenceFields: {
@@ -1979,6 +2031,18 @@ function getUploadConfigStatus() {
       ? { message: "Direct upload storage is not configured." }
       : {}),
   };
+}
+
+function validateUploadCategory(value) {
+  const category = String(value || "").trim();
+  if (!category) return "";
+  if (!UPLOAD_ASSET_CATEGORY_SET.has(category)) {
+    const error = new Error("Please select a valid category.");
+    error.status = 400;
+    error.code = "INVALID_UPLOAD_CATEGORY";
+    throw error;
+  }
+  return category;
 }
 
 function assertUploadConfig() {
@@ -3091,6 +3155,7 @@ app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLim
 app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
   const stagedPathnames = [];
   try {
+    const category = validateUploadCategory(req.body?.category);
     const files = req.body?.files && typeof req.body.files === "object" && !Array.isArray(req.body.files)
       ? req.body.files
       : {};
@@ -3140,7 +3205,7 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
     const payload = buildUploadCreatePayload({
       productTitle: req.body?.productTitle,
       productCode: req.body?.productCode,
-      category: req.body?.category,
+      category,
       price: req.body?.price,
       descriptions: req.body?.descriptions,
       commentNotes: req.body?.commentNotes,
@@ -3173,15 +3238,22 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
       console.warn("Upload staging cleanup failed", { pathnames: stagedPathnames, message: cleanupError.message });
     }
     const isBaserowSizeError = error.status === 413;
+    const isInvalidCategory = error.code === "INVALID_UPLOAD_CATEGORY";
     console.error("Upload finalize failed", { status: error.status, message: error.message });
     res.status(error.status || 500).json({
       ok: false,
-      code: isBaserowSizeError ? "BASEROW_FILE_TOO_LARGE" : "UPLOAD_FINALIZE_FAILED",
-      message: isBaserowSizeError
-        ? "Baserow rejected the image because it exceeds the file limit configured for this Baserow account."
-        : error.message === "Upload Baserow token is not configured."
-          ? error.message
-          : "One or more reference images could not be saved. No Baserow row was created.",
+      code: isInvalidCategory
+        ? error.code
+        : isBaserowSizeError
+          ? "BASEROW_FILE_TOO_LARGE"
+          : "UPLOAD_FINALIZE_FAILED",
+      message: isInvalidCategory
+        ? error.message
+        : isBaserowSizeError
+          ? "Baserow rejected the image because it exceeds the file limit configured for this Baserow account."
+          : error.message === "Upload Baserow token is not configured."
+            ? error.message
+            : "One or more reference images could not be saved. No Baserow row was created.",
     });
   }
 });
@@ -3226,6 +3298,7 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
         return res.status(400).json({ ok: false, error: message });
       }
 
+      const category = validateUploadCategory(req.body?.category);
       const sareeImage = req.files?.sareeImage?.[0] || null;
       const blouseImage = req.files?.blouseImage?.[0] || null;
       const palluImage = req.files?.palluImage?.[0] || null;
@@ -3242,7 +3315,7 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
       const payload = buildUploadCreatePayload({
         productTitle: req.body?.productTitle,
         productCode: req.body?.productCode,
-        category: req.body?.category,
+        category,
         price: req.body?.price,
         descriptions: req.body?.descriptions,
         commentNotes: req.body?.commentNotes,
@@ -3261,7 +3334,10 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
     } catch (error) {
       res.status(error.status || 500).json({
         ok: false,
-        error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to upload saree assets.",
+        code: error.code || "UPLOAD_FAILED",
+        error: error.code === "INVALID_UPLOAD_CATEGORY" || error.message === "Upload Baserow token is not configured."
+          ? error.message
+          : "Unable to upload saree assets.",
       });
     } finally {
       const uploadedFiles = [
