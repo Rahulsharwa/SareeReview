@@ -67,12 +67,15 @@ const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_E
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v5";
+const UPLOAD_SAREE_CACHE_VERSION = "v6";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
 const UPLOAD_RECENT_CACHE_KEY_V4 = `${CACHE_PREFIX}upload-saree:recent:v4`;
+const UPLOAD_RECENT_CACHE_KEY_V5 = `${CACHE_PREFIX}upload-saree:recent:v5`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
-const UPLOAD_RECENT_CACHE_TTL_SECONDS = 60;
+const UPLOAD_FIELDS_CACHE_KEY = `${CACHE_PREFIX}upload-saree:fields:v1`;
+const UPLOAD_RECENT_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_RECENT_SECONDS || 15);
+const UPLOAD_FIELDS_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_FIELDS_SECONDS || 86400);
 const UPLOAD_IMAGE_MIME_TYPES = new Set(
   String(process.env.UPLOAD_ALLOWED_MIME_TYPES || "image/jpeg,image/jpg,image/png,image/webp")
     .split(",")
@@ -99,7 +102,9 @@ const UPLOAD_FIELDS = {
 };
 const UPLOAD_GENERATION_STATUS = {
   start: process.env.UPLOAD_GENERATION_STATUS_START || "Start",
+  pending: process.env.UPLOAD_GENERATION_STATUS_PENDING || "Pending",
   completed: process.env.UPLOAD_GENERATION_STATUS_COMPLETED || "Completed",
+  draft: process.env.UPLOAD_GENERATION_STATUS_DRAFT || "Draft",
   failed: process.env.UPLOAD_GENERATION_STATUS_FAILED || "Failed",
 };
 const UPLOAD_ASSET_CATEGORY_GROUPS = [
@@ -2083,14 +2088,14 @@ function normalizeUploadGenerationStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function shouldShowUploadRow(row = {}) {
+function shouldShowUploadReviewRow(row = {}) {
   const status = normalizeUploadGenerationStatus(
     row.generationStatus
       ?? row.status
       ?? row["Generation Status"]
       ?? row[uploadFieldKey("generationStatus")],
   );
-  return status === "start" || status === "pending";
+  return status === "pending" || status === "completed";
 }
 
 function validateUploadFileDescriptor(file, role) {
@@ -2206,8 +2211,23 @@ async function uploadBaserowFile(file) {
   });
 }
 
-function firstUploadFileUrl(value) {
-  return getFileUrls(value)[0] || "";
+function firstUploadMedia(value) {
+  const file = Array.isArray(value) ? value[0] : value;
+  if (!file) return { url: "", thumbnailUrl: "" };
+  if (typeof file === "string") return { url: file, thumbnailUrl: file };
+
+  const url = file.url
+    || file.thumbnails?.large?.url
+    || file.thumbnails?.card_cover?.url
+    || file.thumbnails?.small?.url
+    || file.thumbnails?.tiny?.url
+    || "";
+  const thumbnailUrl = file.thumbnails?.card_cover?.url
+    || file.thumbnails?.small?.url
+    || file.thumbnails?.tiny?.url
+    || file.thumbnails?.large?.url
+    || url;
+  return { url, thumbnailUrl };
 }
 
 function readUploadField(row, name) {
@@ -2241,6 +2261,16 @@ function normalizeUploadRow(row = {}) {
   const generationStatus = normalizeSocialText(readUploadField(row, "generationStatus"));
   const descriptions = normalizeSocialText(readUploadField(row, "descriptions"));
   const commentNotes = normalizeSocialText(readUploadField(row, "commentNotes"));
+  const media = {
+    saree: firstUploadMedia(readUploadField(row, "sareeImage")),
+    blouse: firstUploadMedia(readUploadField(row, "blouseImage")),
+    pallu: firstUploadMedia(readUploadField(row, "palluImage")),
+    border: firstUploadMedia(readUploadField(row, "borderImage")),
+    front: firstUploadMedia(readUploadField(row, "frontView")),
+    side: firstUploadMedia(readUploadField(row, "sideView")),
+    back: firstUploadMedia(readUploadField(row, "backView")),
+    closeUp: firstUploadMedia(readUploadField(row, "closeUp")),
+  };
   return {
     rowId: row.id,
     productTitle: productTitle || "Untitled Upload",
@@ -2250,16 +2280,8 @@ function normalizeUploadRow(row = {}) {
     generationStatus,
     descriptions,
     commentNotes,
-    images: {
-      saree: firstUploadFileUrl(readUploadField(row, "sareeImage")),
-      blouse: firstUploadFileUrl(readUploadField(row, "blouseImage")),
-      pallu: firstUploadFileUrl(readUploadField(row, "palluImage")),
-      border: firstUploadFileUrl(readUploadField(row, "borderImage")),
-      front: firstUploadFileUrl(readUploadField(row, "frontView")),
-      side: firstUploadFileUrl(readUploadField(row, "sideView")),
-      back: firstUploadFileUrl(readUploadField(row, "backView")),
-      closeUp: firstUploadFileUrl(readUploadField(row, "closeUp")),
-    },
+    images: Object.fromEntries(Object.entries(media).map(([key, item]) => [key, item.url])),
+    thumbnails: Object.fromEntries(Object.entries(media).map(([key, item]) => [key, item.thumbnailUrl])),
   };
 }
 
@@ -2268,34 +2290,89 @@ function appendOptionalUploadField(payload, name, value) {
   if (trimmed) payload[uploadFieldKey(name)] = trimmed;
 }
 
-async function fetchRecentUploadSarees({ refresh = false } = {}) {
-  if (!refresh) {
-    const cached = await cacheGet(UPLOAD_RECENT_CACHE_KEY);
-    if (cached) return { ...cached, cache: { ...cached.cache, status: "hit" } };
+let uploadRecentInflight = null;
+let uploadRecentRefreshInflight = null;
+
+async function getUploadFieldMetadata() {
+  const cached = await cacheGet(UPLOAD_FIELDS_CACHE_KEY);
+  if (cached) return { fields: cached, cacheStatus: "hit" };
+
+  const data = await uploadBaserowFetch(`/api/database/fields/table/${UPLOAD_BASEROW_TABLE_ID}/`);
+  const fields = (Array.isArray(data) ? data : []).map((field) => ({
+    id: field.id,
+    name: field.name,
+    type: field.type,
+    selectOptions: (field.select_options || []).map((option) => ({ id: option.id, value: option.value })),
+  }));
+  await cacheSet(UPLOAD_FIELDS_CACHE_KEY, fields, UPLOAD_FIELDS_CACHE_TTL_SECONDS);
+  return { fields, cacheStatus: "miss" };
+}
+
+function uploadStatusOptionId(fields, status) {
+  const generationField = fields.find((field) => Number(field.id) === Number(UPLOAD_FIELDS.generationStatus));
+  const option = generationField?.selectOptions?.find(
+    (item) => normalizeUploadGenerationStatus(item.value) === normalizeUploadGenerationStatus(status),
+  );
+  return option?.id || null;
+}
+
+async function fetchRecentUploadSareesFromBaserow() {
+  const { fields, cacheStatus: fieldsCacheStatus } = await getUploadFieldMetadata();
+  const pendingOptionId = uploadStatusOptionId(fields, UPLOAD_GENERATION_STATUS.pending);
+  const completedOptionId = uploadStatusOptionId(fields, UPLOAD_GENERATION_STATUS.completed);
+  if (!pendingOptionId || !completedOptionId) {
+    const error = new Error("Pending or Completed is not configured in the Upload Saree Generation Status field.");
+    error.status = 500;
+    throw error;
   }
 
   const params = new URLSearchParams({
     user_field_names: "true",
-    size: "50",
+    size: "200",
+    filter_type: "OR",
   });
+  params.append(`filter__field_${UPLOAD_FIELDS.generationStatus}__single_select_equal`, String(pendingOptionId));
+  params.append(`filter__field_${UPLOAD_FIELDS.generationStatus}__single_select_equal`, String(completedOptionId));
   const data = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`);
   const rawRows = Array.isArray(data.results) ? data.results : [];
-  const visibleRows = rawRows.filter(shouldShowUploadRow);
-  const rows = visibleRows.length
-    ? visibleRows
-      .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
-      .map(normalizeUploadRow)
-    : [];
+  const visibleRows = rawRows.filter(shouldShowUploadReviewRow);
+  const rows = visibleRows
+    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .map(normalizeUploadRow);
   const payload = {
     ok: true,
     rows,
     totalFetched: rawRows.length,
     hiddenRows: rawRows.length - visibleRows.length,
     visibleCount: rows.length,
-    cache: { provider: cacheProvider(), ttlSeconds: UPLOAD_RECENT_CACHE_TTL_SECONDS, status: "miss" },
+    cache: {
+      provider: cacheProvider(),
+      ttlSeconds: UPLOAD_RECENT_CACHE_TTL_SECONDS,
+      fieldsTtlSeconds: UPLOAD_FIELDS_CACHE_TTL_SECONDS,
+      fieldsStatus: fieldsCacheStatus,
+      status: "miss",
+    },
   };
   await cacheSet(UPLOAD_RECENT_CACHE_KEY, payload, UPLOAD_RECENT_CACHE_TTL_SECONDS);
   return payload;
+}
+
+async function fetchRecentUploadSarees({ refresh = false } = {}) {
+  if (!refresh) {
+    const cached = await cacheGet(UPLOAD_RECENT_CACHE_KEY);
+    if (cached) return { ...cached, cache: { ...cached.cache, status: "hit" } };
+  }
+
+  const inflight = refresh ? uploadRecentRefreshInflight : uploadRecentInflight;
+  if (inflight) return inflight;
+
+  const request = fetchRecentUploadSareesFromBaserow().finally(() => {
+    if (refresh) uploadRecentRefreshInflight = null;
+    else uploadRecentInflight = null;
+  });
+  if (refresh) uploadRecentRefreshInflight = request;
+  else uploadRecentInflight = request;
+  return request;
 }
 
 function buildUploadCreatePayload({
@@ -2328,25 +2405,29 @@ function buildUploadCreatePayload({
 }
 
 async function clearUploadCache() {
-  await cacheDelete(UPLOAD_RECENT_CACHE_KEY);
-  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V4);
-  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V2);
-  await cacheDelete(UPLOAD_RECENT_CACHE_KEY_V1);
+  await cacheDelete([
+    UPLOAD_RECENT_CACHE_KEY,
+    UPLOAD_RECENT_CACHE_KEY_V5,
+    UPLOAD_RECENT_CACHE_KEY_V4,
+    UPLOAD_RECENT_CACHE_KEY_V2,
+    UPLOAD_RECENT_CACHE_KEY_V1,
+  ]);
 }
 
-async function patchUploadSareeStatus(rowId, status, feedback = "", { requiredCurrentStatus = "" } = {}) {
+async function patchUploadSareeStatus(rowId, status, feedback = "", { requiredCurrentStatuses = [] } = {}) {
   if (!/^\d+$/.test(String(rowId || ""))) {
     const error = new Error("Invalid upload rowId.");
     error.status = 400;
     throw error;
   }
-  if (requiredCurrentStatus) {
+  if (requiredCurrentStatuses.length) {
     const current = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/${rowId}/?user_field_names=false`);
     const currentStatus = normalizeUploadGenerationStatus(readUploadField(current, "generationStatus"));
-    if (currentStatus !== normalizeUploadGenerationStatus(requiredCurrentStatus)) {
-      const error = new Error("Only Pending upload rows can be approved.");
+    const allowedStatuses = requiredCurrentStatuses.map(normalizeUploadGenerationStatus);
+    if (!allowedStatuses.includes(currentStatus)) {
+      const error = new Error("Only Pending or Completed upload rows can be approved.");
       error.status = 409;
-      error.code = "UPLOAD_NOT_PENDING";
+      error.code = "UPLOAD_NOT_REVIEWABLE";
       throw error;
     }
   }
@@ -2358,10 +2439,10 @@ async function patchUploadSareeStatus(rowId, status, feedback = "", { requiredCu
   return normalizeUploadRow(updated);
 }
 
-function isCompletedStatusConfigurationError(error) {
+function isDraftStatusConfigurationError(error) {
   if (Number(error?.status) !== 400) return false;
   const detail = `${error?.message || ""} ${JSON.stringify(error?.baserow || {})}`.toLowerCase();
-  return detail.includes("completed") && (detail.includes("select") || detail.includes("option") || detail.includes("valid"));
+  return detail.includes("draft") && (detail.includes("select") || detail.includes("option") || detail.includes("valid"));
 }
 
 function buildApprovePayload(tableConfig) {
@@ -3353,22 +3434,20 @@ app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
 
 app.patch("/api/upload-saree/:rowId/approve", requireSocialReviewAuth, async (req, res) => {
   try {
-    const row = await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.completed, "", {
-      requiredCurrentStatus: "Pending",
+    await patchUploadSareeStatus(req.params.rowId, UPLOAD_GENERATION_STATUS.draft, "", {
+      requiredCurrentStatuses: [UPLOAD_GENERATION_STATUS.pending, UPLOAD_GENERATION_STATUS.completed],
     });
     res.json({
       ok: true,
       rowId: Number(req.params.rowId),
-      status: UPLOAD_GENERATION_STATUS.completed,
-      generationStatus: UPLOAD_GENERATION_STATUS.completed,
+      generationStatus: UPLOAD_GENERATION_STATUS.draft,
       hiddenFromDashboard: true,
-      row,
     });
   } catch (error) {
-    const message = error?.code === "UPLOAD_NOT_PENDING"
-      ? "Only Pending upload rows can be approved."
-      : isCompletedStatusConfigurationError(error)
-        ? "The Completed status is not configured in the Upload Saree Baserow table."
+    const message = error?.code === "UPLOAD_NOT_REVIEWABLE"
+      ? "Only Pending or Completed upload rows can be approved."
+      : isDraftStatusConfigurationError(error)
+        ? "The Draft status is not configured in the Upload Saree Baserow table."
         : "Unable to approve the saree. Generation Status was not updated.";
     res.status(error.status || 500).json({ ok: false, error: message });
   }

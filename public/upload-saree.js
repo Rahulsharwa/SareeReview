@@ -26,6 +26,7 @@ const uploadSareeState = {
   currentDetailSignature: "",
   detailLastScrollTop: 0,
   detailHeaderHidden: false,
+  syncAfterDetailClose: false,
   directStorageEnabled: false,
   publicConfig: {},
   clientTimeoutMs: 900000,
@@ -104,13 +105,15 @@ function normalizeUploadGenerationStatus(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function shouldShowUploadRow(row) {
+function shouldShowUploadReviewRow(row) {
   const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
-  return status === "start" || status === "pending";
+  return status === "pending" || status === "completed";
 }
 
-function canApproveUploadRow(row) {
-  return normalizeUploadGenerationStatus(uploadGenerationStatusValue(row)) === "pending";
+function canApproveUploadReviewRow(row) {
+  const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
+  if (status === "completed") return true;
+  return status === "pending" && hasUploadImage(row?.images?.front);
 }
 
 function uploadStatusText(row) {
@@ -127,14 +130,18 @@ function getUploadMainImage(row) {
   const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
   const images = row?.images || {};
   if (status === "pending" && hasUploadImage(images.front)) {
-    return { url: images.front, type: "generated", label: "Front View" };
+    return { key: "front", url: images.front, type: "generated", label: "Front View" };
   }
-  if (hasUploadImage(images.front)) return { url: images.front, type: "generated", label: "Front View" };
-  if (hasUploadImage(images.saree)) return { url: images.saree, type: "reference", label: "Saree Image" };
-  if (hasUploadImage(images.blouse)) return { url: images.blouse, type: "reference", label: "Blouse Image" };
-  if (hasUploadImage(images.pallu)) return { url: images.pallu, type: "reference", label: "Pallu Image" };
-  if (hasUploadImage(images.border)) return { url: images.border, type: "reference", label: "Border Image" };
-  return { url: "", type: "empty", label: "No reference image" };
+  if (hasUploadImage(images.front)) return { key: "front", url: images.front, type: "generated", label: "Front View" };
+  if (hasUploadImage(images.saree)) return { key: "saree", url: images.saree, type: "reference", label: "Saree Image" };
+  if (hasUploadImage(images.blouse)) return { key: "blouse", url: images.blouse, type: "reference", label: "Blouse Image" };
+  if (hasUploadImage(images.pallu)) return { key: "pallu", url: images.pallu, type: "reference", label: "Pallu Image" };
+  if (hasUploadImage(images.border)) return { key: "border", url: images.border, type: "reference", label: "Border Image" };
+  return { key: "", url: "", type: "empty", label: "No reference image" };
+}
+
+function getUploadThumbnail(row, key) {
+  return row?.thumbnails?.[key] || row?.images?.[key] || "";
 }
 
 function getUploadGeneratedImage(row, key = "front") {
@@ -185,7 +192,7 @@ function preloadUploadImage(url) {
 }
 
 function stableUploadRowsSignature(rows) {
-  return JSON.stringify((rows || []).filter(shouldShowUploadRow).map((row) => ({
+  return JSON.stringify((rows || []).filter(shouldShowUploadReviewRow).map((row) => ({
     rowId: row.rowId,
     status: row.generationStatus || row.status || "",
     saree: row.images?.saree || "",
@@ -202,6 +209,7 @@ function stableUploadRowsSignature(rows) {
     price: row.price || "",
     descriptions: row.descriptions || "",
     commentNotes: row.commentNotes || "",
+    thumbnails: row.thumbnails || {},
   })));
 }
 
@@ -302,7 +310,7 @@ function uploadStatusClass(status) {
 }
 
 function currentUploadRow() {
-  return uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
+  return uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((row) => Number(row.rowId) === Number(uploadSareeState.selectedRowId)) || null;
 }
 
 function setUploadMessage(message, isError = false) {
@@ -511,6 +519,7 @@ async function loadRecentUploadSarees(options = {}) {
   } = options;
   const root = document.getElementById("uploadRecentRows");
   if (uploadSareeState.isSyncing) return;
+  if (!uploadSareeState.active && silent) return;
   if (!silent && !uploadSareeState.rows.length) {
     root.innerHTML = `<div class="upload-empty">Loading uploaded sarees...</div>`;
   }
@@ -536,7 +545,7 @@ async function loadRecentUploadSarees(options = {}) {
       : Array.isArray(data.uploads)
         ? data.uploads
         : [];
-    const nextRows = rawRows.filter(shouldShowUploadRow);
+    const nextRows = rawRows.filter(shouldShowUploadReviewRow);
 
     const nextSignature = stableUploadRowsSignature(nextRows);
     if (uploadSareeState.lastRowsSignature !== nextSignature) {
@@ -547,7 +556,7 @@ async function loadRecentUploadSarees(options = {}) {
     updateUploadSyncTime();
 
     if (preserveDetail && uploadSareeState.detailOpen && uploadSareeState.currentRowId) {
-      const updatedRow = uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
+      const updatedRow = uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId));
       if (updatedRow) {
         uploadSareeState.selectedRowId = updatedRow.rowId;
         const nextDetailSignature = getUploadDetailSignature(updatedRow);
@@ -557,14 +566,18 @@ async function loadRecentUploadSarees(options = {}) {
         }
       } else {
         closeUploadImageFullscreen();
-        closeUploadDetail();
+        closeUploadDetail({ refreshAfterClose: false });
       }
     }
 
     if (!silent) showUploadToast("Upload saree data synced.");
   } catch (error) {
     console.error("Upload recent sync failed:", error);
-    root.innerHTML = `<div class="upload-empty">Upload API failed: ${uploadEscapeHtml(error.message)}</div>`;
+    if (!uploadSareeState.rows.length) {
+      root.innerHTML = `<div class="upload-empty">Upload API failed: ${uploadEscapeHtml(error.message)}</div>`;
+    } else if (!silent) {
+      showUploadToast(error.message || "Unable to sync upload sarees.", true);
+    }
   } finally {
     uploadSareeState.loadingRecent = false;
     uploadSareeState.isSyncing = false;
@@ -582,7 +595,7 @@ async function syncUploadSareesNow() {
 function renderUploadRows() {
   const root = document.getElementById("uploadRecentRows");
   const count = document.getElementById("uploadRecentCount");
-  const visibleRows = uploadSareeState.rows.filter(shouldShowUploadRow);
+  const visibleRows = uploadSareeState.rows.filter(shouldShowUploadReviewRow);
   count.textContent = `${visibleRows.length} rows`;
 
   if (!visibleRows.length) {
@@ -593,17 +606,18 @@ function renderUploadRows() {
   root.innerHTML = visibleRows.map((row) => {
     const status = uploadStatusText(row);
     const statusClass = uploadStatusClass(status);
-    const approveDisabled = canApproveUploadRow(row) ? "" : "disabled";
+    const approveDisabled = canApproveUploadReviewRow(row) ? "" : "disabled";
     const mainImage = getUploadMainImage(row);
+    const mainImageUrl = getUploadThumbnail(row, mainImage.key);
     const referenceThumbs = [
-      { key: "saree", label: "Saree", url: row.images?.saree },
-      ...(hasUploadImage(row.images?.blouse) ? [{ key: "blouse", label: "Blouse", url: row.images.blouse }] : []),
-      ...(hasUploadImage(row.images?.pallu) ? [{ key: "pallu", label: "Pallu", url: row.images.pallu }] : []),
-      ...(hasUploadImage(row.images?.border) ? [{ key: "border", label: "Border", url: row.images.border }] : []),
-      { key: "front", label: "Front View", url: row.images?.front },
-      { key: "side", label: "Side View", url: row.images?.side },
-      { key: "back", label: "Back View", url: row.images?.back },
-      { key: "closeUp", label: "Close-Up", url: row.images?.closeUp },
+      { key: "saree", label: "Saree", url: getUploadThumbnail(row, "saree") },
+      ...(hasUploadImage(row.images?.blouse) ? [{ key: "blouse", label: "Blouse", url: getUploadThumbnail(row, "blouse") }] : []),
+      ...(hasUploadImage(row.images?.pallu) ? [{ key: "pallu", label: "Pallu", url: getUploadThumbnail(row, "pallu") }] : []),
+      ...(hasUploadImage(row.images?.border) ? [{ key: "border", label: "Border", url: getUploadThumbnail(row, "border") }] : []),
+      { key: "front", label: "Front View", url: getUploadThumbnail(row, "front") },
+      { key: "side", label: "Side View", url: getUploadThumbnail(row, "side") },
+      { key: "back", label: "Back View", url: getUploadThumbnail(row, "back") },
+      { key: "closeUp", label: "Close-Up", url: getUploadThumbnail(row, "closeUp") },
     ];
     const thumbs = referenceThumbs.map((item) => `
       <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
@@ -614,7 +628,7 @@ function renderUploadRows() {
 
     return `
       <article class="upload-card">
-        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadImage(mainImage.url, mainImage.label, "upload-card-main-img")}</div>
+        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadImage(mainImageUrl, mainImage.label, "upload-card-main-img")}</div>
         <div class="upload-card-body">
           <div class="upload-card-kicker">${uploadEscapeHtml(uploadDisplay(row.productCode, "No product code"))}</div>
           <div class="upload-card-title">${uploadEscapeHtml(uploadDisplay(row.productTitle, "Untitled Upload"))}</div>
@@ -694,9 +708,9 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   renderUploadGeneratedStage(row, selected.key, getUploadGeneratedImage(row, selected.key));
 
   const approveBtn = document.getElementById("uploadApproveBtn");
-  const approveEnabled = canApproveUploadRow(row);
+  const approveEnabled = canApproveUploadReviewRow(row);
   approveBtn.disabled = !approveEnabled;
-  approveBtn.title = approveEnabled ? "Approve generated output" : "Approve is enabled only when Generation Status is Pending";
+  approveBtn.title = approveEnabled ? "Approve generated output" : "Pending approval requires a generated Front View";
   const sheetApproveBtn = document.getElementById("uploadApproveButton");
   if (sheetApproveBtn) {
     sheetApproveBtn.disabled = !approveEnabled;
@@ -708,7 +722,7 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
 }
 
 function openUploadDetail(rowId) {
-  const row = uploadSareeState.rows.filter(shouldShowUploadRow).find((item) => Number(item.rowId) === Number(rowId));
+  const row = uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((item) => Number(item.rowId) === Number(rowId));
   if (!row) return;
   uploadSareeState.detailOpen = true;
   uploadSareeState.currentRowId = rowId;
@@ -729,18 +743,23 @@ function openUploadDetail(rowId) {
   });
 }
 
-function closeUploadDetail() {
+function closeUploadDetail({ refreshAfterClose = true } = {}) {
+  const shouldRefresh = refreshAfterClose && uploadSareeState.syncAfterDetailClose && uploadSareeState.active;
   uploadSareeState.detailOpen = false;
   uploadSareeState.currentRowId = null;
   uploadSareeState.currentDetailSignature = "";
   uploadSareeState.detailLastScrollTop = 0;
   uploadSareeState.detailHeaderHidden = false;
+  uploadSareeState.syncAfterDetailClose = false;
   document.documentElement.classList.remove("upload-detail-open");
   document.body.classList.remove("upload-detail-open");
   getUploadDetailHeader()?.classList.remove("header-hidden");
   closeUploadReviewActions();
   closeUploadImageFullscreen();
   document.getElementById("uploadDetailBackdrop").classList.remove("open");
+  if (shouldRefresh) {
+    loadRecentUploadSarees({ force: false, preserveDetail: false, silent: true });
+  }
 }
 
 function setupUploadDetailHeaderAutoHide() {
@@ -799,14 +818,14 @@ function renderUploadGeneratedStage(row, key, url) {
 }
 
 function getCurrentUploadGeneratedUrl() {
-  const row = uploadSareeState.rows.filter(shouldShowUploadRow).find((item) => Number(item.rowId) === Number(uploadSareeState.currentRowId));
+  const row = uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((item) => Number(item.rowId) === Number(uploadSareeState.currentRowId));
   if (!row) return "";
   const key = uploadSareeState.selectedGeneratedKey || "front";
   return getUploadGeneratedImage(row, key);
 }
 
 function getCurrentUploadRow() {
-  return uploadSareeState.rows.filter(shouldShowUploadRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId)) || null;
+  return uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((row) => Number(row.rowId) === Number(uploadSareeState.currentRowId)) || null;
 }
 
 function openUploadImageFullscreen(event) {
@@ -1079,7 +1098,7 @@ async function submitUploadSareeDirect(form) {
 
 function setUploadActionLoading(loading) {
   const row = currentUploadRow();
-  const approveAllowed = canApproveUploadRow(row);
+  const approveAllowed = canApproveUploadReviewRow(row);
   [
     "uploadRejectButton",
     "uploadRequestChangesButton",
@@ -1102,8 +1121,8 @@ async function updateUploadStatus(action, event) {
     return;
   }
 
-  if (action === "approve" && !canApproveUploadRow(row)) {
-    showUploadToast("Only Pending rows can be approved.", true);
+  if (action === "approve" && !canApproveUploadReviewRow(row)) {
+    showUploadToast("Approve requires a Pending row with Front View, or a Completed row.", true);
     return;
   }
 
@@ -1115,27 +1134,30 @@ async function updateUploadStatus(action, event) {
 
   setUploadActionLoading(true);
   try {
-    const completedRowId = row.rowId;
-    await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
+    const approvedRowId = row.rowId;
+    const result = await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ feedback, comment: feedback, note: feedback }),
     });
+    if (action === "approve" && result.generationStatus !== "Draft") {
+      throw new Error("The server did not confirm the Draft approval status.");
+    }
     closeUploadReviewActions();
     closeUploadImageFullscreen();
-    closeUploadDetail();
-    uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(completedRowId));
+    closeUploadDetail({ refreshAfterClose: false });
+    uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(approvedRowId));
     uploadSareeState.lastRowsSignature = "";
     renderUploadRows();
     showUploadToast(action === "approve"
-      ? "Saree approved successfully. Status changed to Completed."
+      ? "Saree approved successfully."
       : action === "reject"
         ? "Rejected successfully."
         : "Changes requested successfully.");
     await loadRecentUploadSarees({ force: true, preserveDetail: false, silent: true });
   } catch (error) {
     console.error(`Upload ${action} failed:`, error);
-    const message = action === "approve" && error.message !== "The Completed status is not configured in the Upload Saree Baserow table."
+    const message = action === "approve" && error.message !== "The Draft status is not configured in the Upload Saree Baserow table."
       ? "Unable to approve the saree. Generation Status was not updated."
       : error.message || `${action} failed.`;
     setUploadMessage(message, true);
@@ -1240,7 +1262,7 @@ function setUploadSareeActive(active) {
       uploadSareeState.loaded = true;
       loadUploadStatus().finally(() => loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true }));
     } else {
-      loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+      loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true });
     }
     startUploadAutoSync();
   } else {
@@ -1253,8 +1275,11 @@ function startUploadAutoSync() {
   uploadSareeState.syncTimer = setInterval(() => {
     if (!uploadSareeState.active) return;
     if (uploadSareeState.submitting) return;
-    if (uploadSareeState.detailOpen && isMobileUploadView()) return;
-    loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true });
+    if (uploadSareeState.detailOpen && isMobileUploadView()) {
+      uploadSareeState.syncAfterDetailClose = true;
+      return;
+    }
+    loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true });
   }, 15000);
 }
 
