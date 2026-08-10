@@ -180,6 +180,41 @@
       box-shadow: 0 0 0 4px rgba(53,179,108,.12);
     }
 
+    .status-pill.syncing {
+      border-color: #c9c4ba;
+      background: #f4f1eb;
+      color: #4f4a43;
+    }
+
+    .status-pill.syncing .dot {
+      background: #8a8175;
+      box-shadow: 0 0 0 4px rgba(138,129,117,.12);
+    }
+
+    .status-pill.temporarily-offline {
+      border-color: #e3bd69;
+      background: #fff6d8;
+      color: #76520b;
+    }
+
+    .status-pill.temporarily-offline .dot {
+      background: #d89516;
+      box-shadow: 0 0 0 4px rgba(216,149,22,.14);
+    }
+
+    .status-pill.server-error,
+    .status-pill.auth-error {
+      border-color: #e8b0a8;
+      background: #fff0ee;
+      color: #9f2218;
+    }
+
+    .status-pill.server-error .dot,
+    .status-pill.auth-error .dot {
+      background: #c43a2f;
+      box-shadow: 0 0 0 4px rgba(196,58,47,.14);
+    }
+
     .icon-btn {
       width: 48px;
       height: 48px;
@@ -1204,7 +1239,7 @@
       <div class="header-actions">
         <button class="main-menu-btn" id="backMainBtn" type="button">← Back to Main Menu</button>
         <div class="live-copy">◷ Live Sync · Auto 15s<br><span id="updatedAt">Updated: --:--:--</span></div>
-        <span class="status-pill"><span class="dot"></span>Baserow Connected</span>
+        <span class="status-pill" id="sareeConnectionBadge"><span class="dot"></span><span id="sareeConnectionText">Connected</span></span>
         <button class="icon-btn" id="refreshBtn" type="button" title="Refresh data">↻</button>
         <div class="avatar">AM</div>
       </div>
@@ -1721,8 +1756,122 @@
     let products = [];
     let collectionCounts = new Map();
     let isFetchingProducts = false;
-    let pendingFetchOptions = null;
+    let isRefreshingSareeCache = false;
     let sareeAutoSyncTimer = null;
+    let sareeImmediateRefreshTimer = null;
+
+    const SAREE_CONNECTION_STATES = {
+      CONNECTED: { text: 'Connected', className: '' },
+      SYNCING: { text: 'Syncing', className: 'syncing' },
+      TEMPORARILY_OFFLINE: { text: 'Temporarily Offline', className: 'temporarily-offline' },
+      SERVER_ERROR: { text: 'Server Error', className: 'server-error' },
+      AUTH_ERROR: { text: 'Authentication Error', className: 'auth-error' }
+    };
+
+    function setSareeConnectionState(connectionState) {
+      const config = SAREE_CONNECTION_STATES[connectionState] || SAREE_CONNECTION_STATES.CONNECTED;
+      const badge = document.getElementById('sareeConnectionBadge');
+      const text = document.getElementById('sareeConnectionText');
+      if (!badge || !text) return;
+      badge.classList.remove('syncing', 'temporarily-offline', 'server-error', 'auth-error');
+      if (config.className) badge.classList.add(config.className);
+      text.textContent = config.text;
+      badge.dataset.connectionState = connectionState;
+    }
+
+    function classifyFetchFailure({ error, response }) {
+      if (response) {
+        if (response.status === 401 || response.status === 403) return 'AUTH_ERROR';
+        if (response.status >= 500) return 'SERVER_ERROR';
+        return 'HTTP_ERROR';
+      }
+      if (error?.name === 'AbortError') return 'TIMEOUT';
+      if (error instanceof TypeError) return 'NETWORK_TRANSPORT_ERROR';
+      return 'UNKNOWN_ERROR';
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...options, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function fetchProductsWithRetry(url, options = {}) {
+      const delays = [1000, 2000, 4000];
+      let lastError;
+
+      for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+        try {
+          const response = await fetchWithTimeout(url, {
+            ...options,
+            headers: { Accept: 'application/json', ...(options.headers || {}) }
+          }, 15000);
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.success) {
+            const error = new Error(data.error || `Product API returned ${response.status}`);
+            error.response = response;
+            error.apiData = data;
+            throw error;
+          }
+          return { response, data };
+        } catch (error) {
+          lastError = error;
+          const response = error.response;
+          const type = classifyFetchFailure({ error, response });
+          const retryable = type === 'NETWORK_TRANSPORT_ERROR'
+            || type === 'TIMEOUT'
+            || (response && response.status >= 500);
+          if (!retryable || attempt >= delays.length || document.visibilityState === 'hidden') {
+            error.failureType = type;
+            throw error;
+          }
+          await wait(delays[attempt]);
+        }
+      }
+
+      throw lastError;
+    }
+
+    function sareeFailureContent(type, apiData = {}) {
+      if (type === 'AUTH_ERROR' || apiData.code === 'BASEROW_AUTH_FAILED') {
+        return {
+          title: 'Baserow Authentication Error',
+          message: 'The review API could not authenticate with Baserow.',
+          fix: ['Check the backend Baserow credentials', 'Open the Baserow diagnose endpoint'],
+          diagnoseUrl: '/api/baserow/diagnose'
+        };
+      }
+      if (type === 'SERVER_ERROR' || type === 'HTTP_ERROR') {
+        return {
+          title: 'Review Server Error',
+          message: 'The review API returned a server error. Existing data has been preserved.'
+        };
+      }
+      if (type === 'TIMEOUT') {
+        return {
+          title: 'Connection Timed Out',
+          message: 'The dashboard took too long to receive an update. Existing data is still available.'
+        };
+      }
+      return {
+        title: 'Connection Temporarily Interrupted',
+        message: 'The dashboard could not reach the server. Your existing review data has been kept and the connection will retry automatically.'
+      };
+    }
+
+    function updateSareeFailureState(type) {
+      if (type === 'AUTH_ERROR') setSareeConnectionState('AUTH_ERROR');
+      else if (type === 'SERVER_ERROR' || type === 'HTTP_ERROR') setSareeConnectionState('SERVER_ERROR');
+      else setSareeConnectionState('TEMPORARILY_OFFLINE');
+    }
 
     function getActiveReviewMode() {
       return window.reviewModeState?.activeMode || 'saree';
@@ -1838,12 +1987,11 @@
         showToast: shouldShowToast = false,
         initial = false
       } = options;
-      if (isFetchingProducts) {
-        pendingFetchOptions = { ...pendingFetchOptions, ...options };
-        return;
-      }
+      if (isFetchingProducts || state.isSyncing) return;
+      if (silent && document.visibilityState !== 'visible') return;
       isFetchingProducts = true;
       state.isSyncing = true;
+      setSareeConnectionState('SYNCING');
       const previousScrollY = window.scrollY;
 
       try {
@@ -1868,23 +2016,11 @@
         state.sortMode = sort || 'Latest Updated';
         if (sort) params.set('sort', sort);
 
-        const response = await fetch(`/api/products?${params.toString()}`, {
+        const { data } = await fetchProductsWithRetry(`/api/products?${params.toString()}`, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
           cache: 'no-store'
         });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-          // If the backend returned a structured error with fix steps, pass it through
-          if (data && !data.success && (data.fix || data.error)) {
-            renderErrorPanel(data);
-            isFetchingProducts = false;
-            return;
-          }
-          throw new Error(data.error || 'Unable to fetch Baserow products');
-        }
 
         const previousSelectedProductId = state.selectedProductId;
         const nextProducts = (Array.isArray(data.products) ? data.products : []).filter(shouldShowReviewProduct);
@@ -1893,6 +2029,13 @@
         products = nextProducts;
         state.products = products;
         state.lastProductsSignature = nextSignature;
+        if (data.cache?.stale) {
+          setSareeConnectionState('TEMPORARILY_OFFLINE');
+        } else if (data.cache?.partial) {
+          setSareeConnectionState('SERVER_ERROR');
+        } else {
+          setSareeConnectionState('CONNECTED');
+        }
 
         const visibleProducts = filteredProducts();
         if (visibleProducts.length && !visibleProducts.find(p => p.id === state.selectedProductId)) {
@@ -1930,7 +2073,9 @@
         }
 
         if (shouldShowToast && !silent) {
-          showToast(`Live Baserow data refreshed. ${products.length} products loaded.`);
+          showToast(data.cache?.stale
+            ? 'The latest update is temporarily unavailable. Showing recently cached review data.'
+            : `Live Baserow data refreshed. ${products.length} products loaded.`);
         }
         if (preserveScroll) {
           requestAnimationFrame(() => {
@@ -1938,25 +2083,31 @@
           });
         }
       } catch (error) {
-        console.error('Baserow live fetch failed:', error);
+        const type = error.failureType || classifyFetchFailure({ error, response: error.response });
+        const content = sareeFailureContent(type, error.apiData || {});
+        updateSareeFailureState(type);
+        console.warn('Saree Review refresh failed', {
+          type,
+          endpoint: '/api/products',
+          online: navigator.onLine,
+          visibility: document.visibilityState
+        });
         if (!products.length) {
           renderErrorPanel({
-            error: error.message || 'Unable to connect with Baserow.',
-            fix: ['Check the backend .env REST token', 'Restart the backend server', 'Open /api/baserow/diagnose for details'],
-            diagnoseUrl: '/api/baserow/diagnose'
+            ...content,
+            error: content.message
           });
         } else if (!silent) {
-          showToast(error.message || 'Unable to sync Saree Review.');
+          showToast(content.message);
         }
       } finally {
         isFetchingProducts = false;
         state.isSyncing = false;
-        if (pendingFetchOptions) {
-          const nextOptions = pendingFetchOptions;
-          pendingFetchOptions = null;
-          fetchProductsFromAPI(nextOptions);
-        }
       }
+    }
+
+    async function loadSareeReviewData(options = {}) {
+      return fetchProductsFromAPI(options);
     }
 
     async function refreshCacheAndProducts() {
@@ -1966,20 +2117,29 @@
     async function syncSareeReviewNow(event) {
       event?.preventDefault();
       event?.stopPropagation();
+      if (isRefreshingSareeCache || isFetchingProducts || state.isSyncing) return;
+      isRefreshingSareeCache = true;
+      setSareeConnectionState('SYNCING');
       const previousScrollY = window.scrollY;
+      let cacheRefreshSucceeded = false;
       try {
-        await fetch('/api/cache/refresh', {
+        const response = await fetch('/api/cache/refresh', {
           method: 'POST',
           headers: { 'Accept': 'application/json' },
           cache: 'no-store'
         });
+        cacheRefreshSucceeded = response.ok;
       } catch (error) {
         console.warn('Cache refresh skipped:', error.message);
       }
 
-      await fetchCollections({ force: true, render: true });
-      await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: false, showToast: true });
-      requestAnimationFrame(() => window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' }));
+      try {
+        await fetchCollections({ force: !cacheRefreshSucceeded, render: true });
+        await fetchProductsFromAPI({ force: !cacheRefreshSucceeded, preserveDetail: true, preserveScroll: true, silent: false, showToast: true });
+        requestAnimationFrame(() => window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' }));
+      } finally {
+        isRefreshingSareeCache = false;
+      }
     }
 
     function updateSareeSyncTime() {
@@ -1990,6 +2150,8 @@
       stopSareeAutoSync();
       sareeAutoSyncTimer = setInterval(() => {
         if (getActiveReviewMode() !== 'saree') return;
+        if (document.visibilityState !== 'visible') return;
+        if (isRefreshingSareeCache) return;
         if (state.isSyncing) return;
         if (state.view === 'detail' && isMobileSareeView()) return;
         fetchCollections({ render: true }).finally(() => {
@@ -2007,8 +2169,24 @@
       }
     }
 
+    function scheduleImmediateSareeRefresh() {
+      clearTimeout(sareeImmediateRefreshTimer);
+      sareeImmediateRefreshTimer = setTimeout(() => {
+        sareeImmediateRefreshTimer = null;
+        if (getActiveReviewMode() !== 'saree') return;
+        if (document.visibilityState !== 'visible') return;
+        if (state.isSyncing || isFetchingProducts || isRefreshingSareeCache) return;
+        loadSareeReviewData({
+          force: true,
+          preserveFilters: true,
+          preserveDetail: true,
+          preserveScroll: true,
+          silent: true
+        });
+      }, 500);
+    }
+
     function renderErrorPanel(errData) {
-      products = [];
       const fixSteps = Array.isArray(errData.fix)
         ? errData.fix.map((s, i) => `<li style="margin:6px 0;">${i + 1}. ${s}</li>`).join('')
         : '';
@@ -2020,12 +2198,12 @@
           <div style="background:#fff8f8;border:1.5px solid #e8b0a8;border-radius:20px;padding:34px 36px;max-width:680px;margin:32px auto;box-shadow:0 14px 32px rgba(180,35,24,.08);">
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
               <span style="font-size:34px;">&#9888;&#65039;</span>
-              <h2 style="margin:0;color:#b42318;font-family:Georgia,serif;font-size:22px;">Baserow Connection Error</h2>
+              <h2 style="margin:0;color:#b42318;font-family:Georgia,serif;font-size:22px;">${errData.title || 'Review Connection Error'}</h2>
             </div>
             <p style="color:#7a0f1d;font-weight:800;font-size:15px;margin:0 0 12px;">${errData.error || 'Unknown error'}</p>
             ${fixSteps ? `<p style="font-weight:900;color:#2b2118;margin:14px 0 6px;">How to fix:</p><ol style="margin:0;padding-left:18px;color:#4a3520;font-size:14px;line-height:1.7;">${fixSteps}</ol>` : ''}
             ${diagnoseLink}
-            <button type="button" onclick="fetchProductsFromAPI({ showToast: true })" style="margin-top:22px;padding:12px 28px;background:var(--maroon);color:#fff;border:none;border-radius:12px;font-weight:900;cursor:pointer;font-size:14px;">&#8635; Retry Connection</button>
+            <button type="button" onclick="loadSareeReviewData({ force: true, preserveFilters: true, preserveScroll: true, silent: false, showToast: true })" style="margin-top:22px;padding:12px 28px;background:var(--maroon);color:#fff;border:none;border-radius:12px;font-weight:900;cursor:pointer;font-size:14px;">&#8635; Retry Now</button>
           </div>
         </div>`;
       document.getElementById('updatedAt').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -2849,9 +3027,15 @@
     document.getElementById('refreshBtn').addEventListener('click', syncSareeReviewNow);
 
     window.fetchProductsFromAPI = fetchProductsFromAPI;
+    window.loadSareeReviewData = loadSareeReviewData;
     window.syncSareeReviewNow = syncSareeReviewNow;
     window.startSareeAutoSync = startSareeAutoSync;
     window.stopSareeAutoSync = stopSareeAutoSync;
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') scheduleImmediateSareeRefresh();
+    });
+    window.addEventListener('online', scheduleImmediateSareeRefresh);
 
     fetchCollections().finally(() => fetchProductsFromAPI({ initial: true }).finally(startSareeAutoSync));
   </script>

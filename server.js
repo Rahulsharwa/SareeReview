@@ -40,6 +40,7 @@ const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS |
 const CACHE_FIELDS_TTL = Number(process.env.CACHE_TTL_FIELDS_SECONDS || process.env.CACHE_FIELDS_TTL || 86400);
 const CACHE_DIAGNOSE_TTL = Number(process.env.CACHE_TTL_DIAGNOSE_SECONDS || 60);
 const CACHE_STALE_IF_ERROR = String(process.env.CACHE_STALE_IF_ERROR || "true").toLowerCase() !== "false";
+const CACHE_STALE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_STALE_PRODUCTS_SECONDS || 3600);
 
 const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
@@ -838,6 +839,13 @@ function productCacheKey(query = {}) {
   return cacheKey("products", "all", PRODUCT_MEDIA_CACHE_VERSION);
 }
 
+function staleProductCacheKey(query = {}) {
+  if (query.tableId) return cacheKey("stale-products", "table", query.tableId, PRODUCT_MEDIA_CACHE_VERSION);
+  if (query.collection) return cacheKey("stale-products", "collection", normalizeLookupName(query.collection), PRODUCT_MEDIA_CACHE_VERSION);
+  if (query.group) return cacheKey("stale-products", "group", normalizeLookupName(query.group), PRODUCT_MEDIA_CACHE_VERSION);
+  return cacheKey("stale-products", "all", PRODUCT_MEDIA_CACHE_VERSION);
+}
+
 function getMemoryCache(key) {
   const item = memoryCache.get(key);
   if (!item) return null;
@@ -946,11 +954,12 @@ async function cacheDeleteByPrefix(prefix) {
   }
 }
 
-async function invalidateProductCache(tableId = null) {
+async function invalidateProductCache(tableId = null, { clearStale = true } = {}) {
   await Promise.all([
     cacheDelete(cacheKey("collections")),
     cacheDelete(cacheKey("diagnose")),
     cacheDeleteByPrefix(`${CACHE_PREFIX}products:`),
+    clearStale ? cacheDeleteByPrefix(`${CACHE_PREFIX}stale-products:`) : Promise.resolve(),
     tableId ? cacheDelete(cacheKey("products", "table-approved", tableId)) : Promise.resolve(),
     tableId ? cacheDelete(cacheKey("products", "table-visible", tableId)) : Promise.resolve(),
   ]);
@@ -2626,6 +2635,7 @@ async function buildProductsPayload(query = {}) {
   const products = [];
   const collections = [];
   const errors = [];
+  const upstreamFailures = [];
 
   await mapWithConcurrency(tablesToFetch, 4, async (tableConfig) => {
     try {
@@ -2643,6 +2653,8 @@ async function buildProductsPayload(query = {}) {
         error: null,
       });
     } catch (error) {
+      const status = Number(error.status || 502);
+      const code = status === 401 || status === 403 ? "BASEROW_AUTH_FAILED" : "BASEROW_UPSTREAM_FAILED";
       const item = {
         name: tableConfig.name,
         displayName: tableConfig.displayName,
@@ -2652,10 +2664,12 @@ async function buildProductsPayload(query = {}) {
         subcategory: tableConfig.subcategory,
         mediaProfile: tableConfig.mediaProfile,
         count: 0,
-        error: error.baserow || error.message,
+        error: "Unable to load this collection.",
+        code,
       };
       collections.push(item);
       errors.push(item);
+      upstreamFailures.push({ status, code });
     }
   });
 
@@ -2678,6 +2692,8 @@ async function buildProductsPayload(query = {}) {
       totalTables: tablesToFetch.length,
       successfulTables: collections.filter((item) => !item.error).length,
       failedTables: errors.length,
+      authFailures: upstreamFailures.filter((item) => item.code === "BASEROW_AUTH_FAILED").length,
+      upstreamFailures: upstreamFailures.length,
       filter: "Generation Status = Approved and Shopify Notes != Approved",
     },
   };
@@ -2702,9 +2718,32 @@ app.get("/api/collections", async (req, res) => {
 });
 
 app.get("/api/products", async (req, res) => {
+  const key = productCacheKey(req.query);
+  const staleKey = staleProductCacheKey(req.query);
+  const bypassCache = req.query.refresh === "1" || req.query.force === "1";
+  let staleCached = null;
+
+  function sendStaleProducts(status = "upstream-error") {
+    const products = applyProductFilters(staleCached.products || [], req.query);
+    console.warn("Saree products served from stale cache", {
+      route: "/api/products",
+      cacheHit: true,
+      baserowRequestAttempted: true,
+      status,
+    });
+    return res.json({
+      ...staleCached,
+      count: products.length,
+      products,
+      cache: { provider: cacheProvider(), status: "stale", stale: true, ttlSeconds: CACHE_STALE_PRODUCTS_TTL },
+      debug: {
+        ...staleCached.debug,
+        cache: { provider: cacheProvider(), status: "stale", stale: true, ttlSeconds: CACHE_STALE_PRODUCTS_TTL },
+      },
+    });
+  }
+
   try {
-    const key = productCacheKey(req.query);
-    const bypassCache = req.query.refresh === "1" || req.query.force === "1";
     const cached = bypassCache ? null : await cacheGet(key);
     if (cached) {
       const products = applyProductFilters(cached.products || [], req.query);
@@ -2712,22 +2751,59 @@ app.get("/api/products", async (req, res) => {
         ...cached,
         count: products.length,
         products,
+        cache: { provider: cacheProvider(), status: "hit", stale: false, ttlSeconds: CACHE_PRODUCTS_TTL },
         debug: { ...cached.debug, cache: { provider: cacheProvider(), status: "hit", ttlSeconds: CACHE_PRODUCTS_TTL } },
       });
     }
+    if (CACHE_STALE_IF_ERROR) staleCached = await cacheGet(staleKey);
 
     const payload = await buildProductsPayload(req.query);
-    await cacheSet(key, payload, CACHE_PRODUCTS_TTL);
+    if (payload.debug?.authFailures) {
+      const error = new Error("Baserow authentication failed.");
+      error.status = 401;
+      error.code = "BASEROW_AUTH_FAILED";
+      throw error;
+    }
+    if (payload.debug?.failedTables) {
+      if (staleCached) return sendStaleProducts("partial-upstream-error");
+      const error = new Error("Baserow product refresh was incomplete.");
+      error.status = 502;
+      error.code = "BASEROW_UPSTREAM_FAILED";
+      throw error;
+    }
+    await Promise.all([
+      cacheSet(key, payload, CACHE_PRODUCTS_TTL),
+      cacheSet(staleKey, payload, CACHE_STALE_PRODUCTS_TTL),
+    ]);
     const products = applyProductFilters(payload.products || [], req.query);
     res.json({
       ...payload,
       count: products.length,
       products,
+      cache: {
+        provider: cacheProvider(),
+        status: bypassCache ? "bypass" : "miss",
+        stale: false,
+        partial: false,
+        ttlSeconds: CACHE_PRODUCTS_TTL,
+      },
       debug: { ...payload.debug, cache: { provider: cacheProvider(), status: bypassCache ? "bypass" : "miss", ttlSeconds: CACHE_PRODUCTS_TTL } },
     });
   } catch (error) {
-    console.error(error);
-    res.status(error.status || 500).json({ success: false, error: error.message });
+    const status = Number(error.status || 502);
+    const authFailure = status === 401 || status === 403 || error.code === "BASEROW_AUTH_FAILED";
+    if (!authFailure && staleCached) return sendStaleProducts(status);
+    console.warn("Saree products request failed", {
+      route: "/api/products",
+      cacheHit: false,
+      baserowRequestAttempted: true,
+      status,
+    });
+    res.status(authFailure ? status : status >= 500 ? status : 502).json({
+      success: false,
+      code: authFailure ? "BASEROW_AUTH_FAILED" : "BASEROW_UPSTREAM_FAILED",
+      error: authFailure ? "Baserow authentication failed." : "The Baserow service is temporarily unavailable.",
+    });
   }
 });
 
@@ -2859,6 +2935,7 @@ app.get("/api/cache/status", async (req, res) => {
       collections: CACHE_COLLECTIONS_TTL,
       fields: CACHE_FIELDS_TTL,
       diagnose: CACHE_DIAGNOSE_TTL,
+      staleProducts: CACHE_STALE_PRODUCTS_TTL,
     },
     staleIfError: CACHE_STALE_IF_ERROR,
     prefixConfigured: Boolean(CACHE_PREFIX),
@@ -2891,7 +2968,7 @@ app.get("/api/cache/status", async (req, res) => {
 
 app.post("/api/cache/refresh", async (req, res) => {
   try {
-    await invalidateProductCache();
+    await invalidateProductCache(null, { clearStale: false });
     await Promise.all([
       cacheDelete(legacyCacheKey("collections", "all")),
       cacheDelete(legacyCacheKey("collections")),
@@ -2909,9 +2986,18 @@ app.post("/api/cache/refresh", async (req, res) => {
       buildProductsPayload({}),
     ]);
 
+    if (products.debug?.authFailures || products.debug?.failedTables) {
+      const error = new Error(products.debug?.authFailures
+        ? "Baserow authentication failed."
+        : "Baserow product refresh was incomplete.");
+      error.status = products.debug?.authFailures ? 401 : 502;
+      throw error;
+    }
+
     await Promise.all([
       cacheSet(cacheKey("collections"), collections, CACHE_COLLECTIONS_TTL),
       cacheSet(productCacheKey({}), products, CACHE_PRODUCTS_TTL),
+      cacheSet(staleProductCacheKey({}), products, CACHE_STALE_PRODUCTS_TTL),
     ]);
 
     res.json({
