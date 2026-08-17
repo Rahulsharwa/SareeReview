@@ -147,10 +147,6 @@ function getUploadMainImage(row) {
   return { key: "", url: "", type: "empty", label: "No reference image" };
 }
 
-function getUploadThumbnail(row, key) {
-  return row?.thumbnails?.[key] || row?.images?.[key] || "";
-}
-
 function getUploadGeneratedImage(row, key = "front") {
   return row?.images?.[key] || row?.generated?.[key] || "";
 }
@@ -662,7 +658,7 @@ function renderUploadRows({ preserveViewport = true } = {}) {
     const statusClass = uploadStatusClass(status);
     const approveDisabled = canApproveUploadReviewRow(row) ? "" : "disabled";
     const mainImage = getUploadMainImage(row);
-    const mainImageUrl = getUploadThumbnail(row, mainImage.key);
+    const mainImageUrl = mainImage.url;
     const referenceThumbs = [
       { key: "saree", label: "Saree" },
       { key: "blouse", label: "Blouse" },
@@ -676,7 +672,7 @@ function renderUploadRows({ preserveViewport = true } = {}) {
     ].filter((item) => hasUploadImage(row.images?.[item.key]));
     const thumbs = referenceThumbs.map((item) => `
       <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
-        <div class="upload-thumb-media upload-media-thumb">${renderUploadZoomableImage(getUploadThumbnail(row, item.key), row.images[item.key], item.label)}</div>
+        <div class="upload-thumb-media upload-media-thumb">${renderUploadZoomableImage(row.images[item.key], row.images[item.key], item.label)}</div>
         <span>${uploadEscapeHtml(item.label)}</span>
       </div>
     `).join("");
