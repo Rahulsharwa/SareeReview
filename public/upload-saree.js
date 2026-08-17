@@ -178,7 +178,7 @@ function renderUploadImage(src, label, className = "") {
   if (!hasUploadImage(src)) {
     return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
   }
-  return `<img class="${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" decoding="async" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
+  return `<img class="upload-media-fit ${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" decoding="async" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
 }
 
 function renderUploadZoomableImage(displayUrl, originalUrl, label, className = "") {
@@ -676,14 +676,14 @@ function renderUploadRows({ preserveViewport = true } = {}) {
     ].filter((item) => hasUploadImage(row.images?.[item.key]));
     const thumbs = referenceThumbs.map((item) => `
       <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
-        <div class="upload-thumb-media">${renderUploadZoomableImage(getUploadThumbnail(row, item.key), row.images[item.key], item.label)}</div>
+        <div class="upload-thumb-media upload-media-thumb">${renderUploadZoomableImage(getUploadThumbnail(row, item.key), row.images[item.key], item.label)}</div>
         <span>${uploadEscapeHtml(item.label)}</span>
       </div>
     `).join("");
 
     return `
       <article class="upload-card" data-upload-row-id="${uploadEscapeAttr(row.rowId)}">
-        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadZoomableImage(mainImageUrl, mainImage.url, mainImage.label, "upload-card-main-img")}</div>
+        <div class="upload-card-media upload-main-image upload-recent-main-media ${uploadEscapeAttr(mainImage.type)}">${renderUploadZoomableImage(mainImageUrl, mainImage.url, mainImage.label, "upload-card-main-img")}</div>
         <div class="upload-card-body">
           <div class="upload-card-kicker">${uploadEscapeHtml(uploadDisplay(row.productCode, "No product code"))}</div>
           <div class="upload-card-title">${uploadEscapeHtml(uploadDisplay(row.productTitle, "Untitled Upload"))}</div>
@@ -751,7 +751,7 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
     <div class="upload-media-box">
       <div class="upload-media-label">${uploadEscapeHtml(item.label)}</div>
-      <div class="upload-media-img upload-compare-image upload-reference-stage">${hasUploadImage(item.url) ? renderUploadZoomableImage(item.url, item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
+      <div class="upload-media-img upload-compare-image upload-reference-stage upload-detail-reference-stage">${hasUploadImage(item.url) ? renderUploadZoomableImage(item.url, item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
     </div>
   `).join("");
 

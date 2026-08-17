@@ -445,13 +445,24 @@
   overflow: hidden;
 }
 
-.upload-card-media img,
-.upload-main-image img,
-.upload-media-box img,
-.upload-generated-preview img {
+.upload-media-fit {
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
   display: block;
+}
+
+.upload-recent-main-media {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #f7ecdb;
 }
 
 .upload-zoomable-image {
@@ -474,19 +485,7 @@
   outline-offset: -3px;
 }
 
-.upload-main-image.reference img {
-  object-fit: contain;
-  background: #fffaf2;
-}
-
-.upload-main-image.generated img,
-.upload-main-image.reference img,
-.upload-thumb-media img { object-fit: contain; }
-
-.upload-media-box img,
-.upload-generated-preview img {
-  object-fit: contain;
-}
+.upload-main-image.reference img { background: #fffaf2; }
 
 .upload-card-body {
   padding: 18px;
@@ -552,11 +551,27 @@
 }
 
 .upload-thumb-media {
-  height: 54px;
+  height: auto;
+  aspect-ratio: 1 / 1;
   border: 1px solid #e6d7c2;
   border-radius: 10px;
   overflow: hidden;
   background: #fff7ea;
+}
+
+.upload-media-thumb {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7ecdb;
+}
+
+.upload-media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
 }
 
 .upload-thumb-media .upload-zoomable-image { border-radius: 9px; }
@@ -705,8 +720,26 @@
   color: var(--upload-muted);
 }
 
-.upload-media-img {
-  height: 310px;
+.upload-detail-reference-stage {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  background: #fffaf2;
+}
+
+.upload-detail-reference-stage .upload-zoomable-image,
+.upload-detail-reference-stage img {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: none;
+  object-fit: contain;
+  object-position: center;
 }
 
 .upload-generated-tabs {
@@ -723,11 +756,36 @@
 }
 
 .upload-generated-preview {
-  height: min(62vh, 660px);
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
   border: 1px solid #e1c99d;
   border-radius: 20px;
   background: #fff9ef;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.upload-generated-stage {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: #fffaf2;
+}
+
+.upload-generated-stage .upload-zoomable-image,
+.upload-generated-stage img {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: none;
+  object-fit: contain;
+  object-position: top center;
 }
 
 .upload-generated-image-wrap {
@@ -766,6 +824,7 @@
 }
 
 .upload-fullscreen-stage {
+  position: relative;
   width: 100%;
   height: 100%;
   display: grid;
@@ -778,6 +837,9 @@
 .upload-fullscreen-stage:active { cursor: grabbing; }
 
 .upload-fullscreen-stage img {
+  position: absolute;
+  inset: 0;
+  margin: auto;
   max-width: 100%;
   max-height: 100%;
   width: auto;
@@ -880,6 +942,13 @@ body.upload-fullscreen-open {
   opacity: 1;
 }
 
+@media (min-width: 761px) {
+  .upload-recent-main-media {
+    min-height: 360px;
+    aspect-ratio: 4 / 5;
+  }
+}
+
 @media (max-width: 1180px) {
   .upload-field-grid { grid-template-columns: 1fr 1fr; }
   .upload-card-grid { grid-template-columns: 1fr; }
@@ -924,9 +993,6 @@ body.upload-fullscreen-open {
     align-items: stretch;
     flex-direction: column;
   }
-  .upload-generated-preview {
-    height: 360px;
-  }
   .upload-selected-file {
     grid-template-columns: 1fr;
   }
@@ -946,14 +1012,18 @@ body.upload-fullscreen-open {
     width: 100%;
     height: auto;
     min-height: 0;
-    aspect-ratio: 4 / 5;
+    aspect-ratio: auto;
+    max-height: none;
     background: #f6ead9;
   }
 
   .upload-main-image img,
   .upload-card-media img {
     width: 100%;
-    height: 100%;
+    height: auto;
+    max-height: none;
+    object-fit: contain;
+    object-position: center;
     display: block;
   }
 

@@ -68,12 +68,13 @@ const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_E
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v7";
+const UPLOAD_SAREE_CACHE_VERSION = "v8";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
 const UPLOAD_RECENT_CACHE_KEY_V4 = `${CACHE_PREFIX}upload-saree:recent:v4`;
 const UPLOAD_RECENT_CACHE_KEY_V5 = `${CACHE_PREFIX}upload-saree:recent:v5`;
 const UPLOAD_RECENT_CACHE_KEY_V6 = `${CACHE_PREFIX}upload-saree:recent:v6`;
+const UPLOAD_RECENT_CACHE_KEY_V7 = `${CACHE_PREFIX}upload-saree:recent:v7`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
 const UPLOAD_FIELDS_CACHE_KEY = `${CACHE_PREFIX}upload-saree:fields:v1`;
 const UPLOAD_RECENT_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_RECENT_SECONDS || 15);
@@ -2233,9 +2234,9 @@ function firstUploadMedia(value) {
     || file.thumbnails?.small?.url
     || file.thumbnails?.tiny?.url
     || "";
-  const thumbnailUrl = file.thumbnails?.card_cover?.url
+  const thumbnailUrl = file.thumbnails?.tiny?.url
     || file.thumbnails?.small?.url
-    || file.thumbnails?.tiny?.url
+    || file.thumbnails?.card_cover?.url
     || file.thumbnails?.large?.url
     || url;
   return { url, thumbnailUrl };
@@ -2420,6 +2421,7 @@ function buildUploadCreatePayload({
 async function clearUploadCache() {
   await cacheDelete([
     UPLOAD_RECENT_CACHE_KEY,
+    UPLOAD_RECENT_CACHE_KEY_V7,
     UPLOAD_RECENT_CACHE_KEY_V6,
     UPLOAD_RECENT_CACHE_KEY_V5,
     UPLOAD_RECENT_CACHE_KEY_V4,
