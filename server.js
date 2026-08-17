@@ -68,11 +68,12 @@ const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_E
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v6";
+const UPLOAD_SAREE_CACHE_VERSION = "v7";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
 const UPLOAD_RECENT_CACHE_KEY_V4 = `${CACHE_PREFIX}upload-saree:recent:v4`;
 const UPLOAD_RECENT_CACHE_KEY_V5 = `${CACHE_PREFIX}upload-saree:recent:v5`;
+const UPLOAD_RECENT_CACHE_KEY_V6 = `${CACHE_PREFIX}upload-saree:recent:v6`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
 const UPLOAD_FIELDS_CACHE_KEY = `${CACHE_PREFIX}upload-saree:fields:v1`;
 const UPLOAD_RECENT_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_RECENT_SECONDS || 15);
@@ -100,6 +101,7 @@ const UPLOAD_FIELDS = {
   backView: process.env.UPLOAD_FIELD_BACK_VIEW || "9535579",
   sideView: process.env.UPLOAD_FIELD_SIDE_VIEW || "9535580",
   closeUp: process.env.UPLOAD_FIELD_CLOSE_UP || "9535581",
+  blouseGrid: process.env.UPLOAD_FIELD_BLOUSE_GRID || "9902236",
 };
 const UPLOAD_GENERATION_STATUS = {
   start: process.env.UPLOAD_GENERATION_STATUS_START || "Start",
@@ -2258,6 +2260,7 @@ function readUploadField(row, name) {
     backView: "Back View",
     sideView: "Side View",
     closeUp: "Close-Up",
+    blouseGrid: "BlouseGrid",
   };
   return row[displayNames[name]];
 }
@@ -2279,6 +2282,7 @@ function normalizeUploadRow(row = {}) {
     side: firstUploadMedia(readUploadField(row, "sideView")),
     back: firstUploadMedia(readUploadField(row, "backView")),
     closeUp: firstUploadMedia(readUploadField(row, "closeUp")),
+    blouseGrid: firstUploadMedia(readUploadField(row, "blouseGrid")),
   };
   return {
     rowId: row.id,
@@ -2416,6 +2420,7 @@ function buildUploadCreatePayload({
 async function clearUploadCache() {
   await cacheDelete([
     UPLOAD_RECENT_CACHE_KEY,
+    UPLOAD_RECENT_CACHE_KEY_V6,
     UPLOAD_RECENT_CACHE_KEY_V5,
     UPLOAD_RECENT_CACHE_KEY_V4,
     UPLOAD_RECENT_CACHE_KEY_V2,

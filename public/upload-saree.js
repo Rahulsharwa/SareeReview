@@ -27,6 +27,15 @@ const uploadSareeState = {
   detailLastScrollTop: 0,
   detailHeaderHidden: false,
   syncAfterDetailClose: false,
+  savedPageScrollY: 0,
+  pageScrollLocked: false,
+  returnNavigation: null,
+  viewerScale: 1,
+  viewerX: 0,
+  viewerY: 0,
+  viewerFit: true,
+  viewerPointers: new Map(),
+  viewerPinchDistance: 0,
   directStorageEnabled: false,
   publicConfig: {},
   clientTimeoutMs: 900000,
@@ -70,6 +79,7 @@ const UPLOAD_GENERATED_TABS = [
   { key: "side", label: "Side View" },
   { key: "back", label: "Back View" },
   { key: "closeUp", label: "Close-Up" },
+  { key: "blouseGrid", label: "Blouse Grid" },
 ];
 
 function uploadEscapeHtml(value) {
@@ -127,16 +137,13 @@ function hasUploadImage(url) {
 }
 
 function getUploadMainImage(row) {
-  const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
   const images = row?.images || {};
-  if (status === "pending" && hasUploadImage(images.front)) {
-    return { key: "front", url: images.front, type: "generated", label: "Front View" };
-  }
   if (hasUploadImage(images.front)) return { key: "front", url: images.front, type: "generated", label: "Front View" };
   if (hasUploadImage(images.saree)) return { key: "saree", url: images.saree, type: "reference", label: "Saree Image" };
-  if (hasUploadImage(images.blouse)) return { key: "blouse", url: images.blouse, type: "reference", label: "Blouse Image" };
-  if (hasUploadImage(images.pallu)) return { key: "pallu", url: images.pallu, type: "reference", label: "Pallu Image" };
-  if (hasUploadImage(images.border)) return { key: "border", url: images.border, type: "reference", label: "Border Image" };
+  if (hasUploadImage(images.side)) return { key: "side", url: images.side, type: "generated", label: "Side View" };
+  if (hasUploadImage(images.back)) return { key: "back", url: images.back, type: "generated", label: "Back View" };
+  if (hasUploadImage(images.closeUp)) return { key: "closeUp", url: images.closeUp, type: "generated", label: "Close-Up" };
+  if (hasUploadImage(images.blouseGrid)) return { key: "blouseGrid", url: images.blouseGrid, type: "generated", label: "Blouse Grid" };
   return { key: "", url: "", type: "empty", label: "No reference image" };
 }
 
@@ -146,6 +153,10 @@ function getUploadThumbnail(row, key) {
 
 function getUploadGeneratedImage(row, key = "front") {
   return row?.images?.[key] || row?.generated?.[key] || "";
+}
+
+function getAvailableUploadGeneratedTabs(row) {
+  return UPLOAD_GENERATED_TABS.filter((tab) => hasUploadImage(getUploadGeneratedImage(row, tab.key)));
 }
 
 function getGeneratedImage(row, key = "front") {
@@ -168,6 +179,17 @@ function renderUploadImage(src, label, className = "") {
     return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
   }
   return `<img class="${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" decoding="async" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
+}
+
+function renderUploadZoomableImage(displayUrl, originalUrl, label, className = "") {
+  if (!hasUploadImage(displayUrl) || !hasUploadImage(originalUrl)) {
+    return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
+  }
+  return `
+    <button class="upload-zoomable-image" type="button" data-upload-zoom-url="${uploadEscapeAttr(originalUrl)}" data-upload-zoom-label="${uploadEscapeAttr(label)}" aria-label="Open ${uploadEscapeAttr(label)} full screen">
+      ${renderUploadImage(displayUrl, label, className)}
+    </button>
+  `;
 }
 
 function handleUploadImageError(image, label) {
@@ -203,6 +225,7 @@ function stableUploadRowsSignature(rows) {
     side: row.images?.side || "",
     back: row.images?.back || "",
     closeUp: row.images?.closeUp || "",
+    blouseGrid: row.images?.blouseGrid || "",
     title: row.productTitle || "",
     code: row.productCode || "",
     category: row.category || "",
@@ -225,6 +248,7 @@ function getUploadDetailSignature(row) {
     side: row.images?.side || "",
     back: row.images?.back || "",
     closeUp: row.images?.closeUp || "",
+    blouseGrid: row.images?.blouseGrid || "",
     descriptions: row.descriptions || "",
     commentNotes: row.commentNotes || "",
   });
@@ -585,21 +609,51 @@ async function loadRecentUploadSarees(options = {}) {
 }
 
 function updateUploadSyncTime() {
-  document.getElementById("uploadUpdatedAt").textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+  const updatedAt = document.getElementById("uploadUpdatedAt");
+  if (updatedAt) updatedAt.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
 }
 
 async function syncUploadSareesNow() {
   await loadRecentUploadSarees({ force: true, preserveDetail: true, silent: false });
 }
 
-function renderUploadRows() {
+function captureUploadViewportAnchor() {
+  const cards = Array.from(document.querySelectorAll("#uploadRecentRows [data-upload-row-id]"));
+  const anchor = cards.find((card) => card.getBoundingClientRect().bottom > 0);
+  if (!anchor) return { rowId: null, offset: 0, scrollY: window.scrollY };
+  return {
+    rowId: anchor.dataset.uploadRowId,
+    offset: anchor.getBoundingClientRect().top,
+    scrollY: window.scrollY,
+  };
+}
+
+function restoreUploadViewportAnchor(anchor) {
+  if (!anchor) return;
+  requestAnimationFrame(() => {
+    const card = anchor.rowId
+      ? document.querySelector(`#uploadRecentRows [data-upload-row-id="${CSS.escape(String(anchor.rowId))}"]`)
+      : null;
+    if (card) {
+      window.scrollBy(0, card.getBoundingClientRect().top - anchor.offset);
+    } else {
+      window.scrollTo(0, anchor.scrollY || 0);
+    }
+  });
+}
+
+function renderUploadRows({ preserveViewport = true } = {}) {
   const root = document.getElementById("uploadRecentRows");
   const count = document.getElementById("uploadRecentCount");
+  const viewportAnchor = preserveViewport && !uploadSareeState.detailOpen
+    ? captureUploadViewportAnchor()
+    : null;
   const visibleRows = uploadSareeState.rows.filter(shouldShowUploadReviewRow);
   count.textContent = `${visibleRows.length} rows`;
 
   if (!visibleRows.length) {
     root.innerHTML = `<div class="upload-empty">No uploaded sarees found.</div>`;
+    restoreUploadViewportAnchor(viewportAnchor);
     return;
   }
 
@@ -610,25 +664,26 @@ function renderUploadRows() {
     const mainImage = getUploadMainImage(row);
     const mainImageUrl = getUploadThumbnail(row, mainImage.key);
     const referenceThumbs = [
-      { key: "saree", label: "Saree", url: getUploadThumbnail(row, "saree") },
-      ...(hasUploadImage(row.images?.blouse) ? [{ key: "blouse", label: "Blouse", url: getUploadThumbnail(row, "blouse") }] : []),
-      ...(hasUploadImage(row.images?.pallu) ? [{ key: "pallu", label: "Pallu", url: getUploadThumbnail(row, "pallu") }] : []),
-      ...(hasUploadImage(row.images?.border) ? [{ key: "border", label: "Border", url: getUploadThumbnail(row, "border") }] : []),
-      { key: "front", label: "Front View", url: getUploadThumbnail(row, "front") },
-      { key: "side", label: "Side View", url: getUploadThumbnail(row, "side") },
-      { key: "back", label: "Back View", url: getUploadThumbnail(row, "back") },
-      { key: "closeUp", label: "Close-Up", url: getUploadThumbnail(row, "closeUp") },
-    ];
+      { key: "saree", label: "Saree" },
+      { key: "blouse", label: "Blouse" },
+      { key: "pallu", label: "Pallu" },
+      { key: "border", label: "Border" },
+      { key: "front", label: "Front View" },
+      { key: "side", label: "Side View" },
+      { key: "back", label: "Back View" },
+      { key: "closeUp", label: "Close-Up" },
+      { key: "blouseGrid", label: "Blouse Grid" },
+    ].filter((item) => hasUploadImage(row.images?.[item.key]));
     const thumbs = referenceThumbs.map((item) => `
       <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
-        <div class="upload-thumb-media">${renderUploadImage(item.url, item.label)}</div>
+        <div class="upload-thumb-media">${renderUploadZoomableImage(getUploadThumbnail(row, item.key), row.images[item.key], item.label)}</div>
         <span>${uploadEscapeHtml(item.label)}</span>
       </div>
     `).join("");
 
     return `
-      <article class="upload-card">
-        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadImage(mainImageUrl, mainImage.label, "upload-card-main-img")}</div>
+      <article class="upload-card" data-upload-row-id="${uploadEscapeAttr(row.rowId)}">
+        <div class="upload-card-media upload-main-image ${uploadEscapeAttr(mainImage.type)}">${renderUploadZoomableImage(mainImageUrl, mainImage.url, mainImage.label, "upload-card-main-img")}</div>
         <div class="upload-card-body">
           <div class="upload-card-kicker">${uploadEscapeHtml(uploadDisplay(row.productCode, "No product code"))}</div>
           <div class="upload-card-title">${uploadEscapeHtml(uploadDisplay(row.productTitle, "Untitled Upload"))}</div>
@@ -647,6 +702,7 @@ function renderUploadRows() {
       </article>
     `;
   }).join("");
+  restoreUploadViewportAnchor(viewportAnchor);
 }
 
 function renderUploadDetail(row = currentUploadRow(), options = {}) {
@@ -695,17 +751,28 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
     <div class="upload-media-box">
       <div class="upload-media-label">${uploadEscapeHtml(item.label)}</div>
-      <div class="upload-media-img upload-compare-image upload-reference-stage">${hasUploadImage(item.url) ? renderUploadImage(item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
+      <div class="upload-media-img upload-compare-image upload-reference-stage">${hasUploadImage(item.url) ? renderUploadZoomableImage(item.url, item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
     </div>
   `).join("");
 
-  const selected = UPLOAD_GENERATED_TABS.find((tab) => tab.key === uploadSareeState.selectedGeneratedKey) || UPLOAD_GENERATED_TABS[0];
-  uploadSareeState.selectedGeneratedKey = selected.key;
-  document.getElementById("uploadGeneratedTabs").innerHTML = UPLOAD_GENERATED_TABS.map((tab) => `
-    <button class="upload-btn ${tab.key === selected.key ? "active" : ""}" type="button" data-key="${uploadEscapeAttr(tab.key)}" onclick="selectUploadGenerated('${tab.key}')">${uploadEscapeHtml(tab.label)}</button>
+  const availableTabs = getAvailableUploadGeneratedTabs(row);
+  const selected = availableTabs.find((tab) => tab.key === uploadSareeState.selectedGeneratedKey)
+    || availableTabs.find((tab) => tab.key === "front")
+    || availableTabs[0]
+    || null;
+  uploadSareeState.selectedGeneratedKey = selected?.key || "";
+  document.getElementById("uploadGeneratedTabs").innerHTML = availableTabs.map((tab) => `
+    <button class="upload-btn ${tab.key === selected?.key ? "active" : ""}" type="button" data-key="${uploadEscapeAttr(tab.key)}" onclick="selectUploadGenerated('${tab.key}')">${uploadEscapeHtml(tab.label)}</button>
   `).join("");
 
-  renderUploadGeneratedStage(row, selected.key, getUploadGeneratedImage(row, selected.key));
+  if (selected) {
+    renderUploadGeneratedStage(row, selected.key, getUploadGeneratedImage(row, selected.key));
+  } else {
+    const stage = document.getElementById("uploadGeneratedPreview");
+    if (stage) stage.innerHTML = `<div class="upload-empty-media">No generated outputs available</div>`;
+  }
+  const fullscreenButton = document.getElementById("uploadFullscreenButton");
+  if (fullscreenButton) fullscreenButton.hidden = !selected;
 
   const approveBtn = document.getElementById("uploadApproveBtn");
   const approveEnabled = canApproveUploadReviewRow(row);
@@ -721,9 +788,61 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   });
 }
 
+function captureUploadReturnNavigation(rowId) {
+  const visibleRows = uploadSareeState.rows.filter(shouldShowUploadReviewRow);
+  const index = visibleRows.findIndex((item) => Number(item.rowId) === Number(rowId));
+  uploadSareeState.returnNavigation = {
+    rowId: String(rowId),
+    nextRowId: index >= 0 ? visibleRows[index + 1]?.rowId || null : null,
+    previousRowId: index > 0 ? visibleRows[index - 1]?.rowId || null : null,
+    scrollY: window.scrollY,
+  };
+}
+
+function lockUploadPageScroll() {
+  if (uploadSareeState.pageScrollLocked) return;
+  uploadSareeState.savedPageScrollY = window.scrollY;
+  uploadSareeState.pageScrollLocked = true;
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${uploadSareeState.savedPageScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+  document.documentElement.classList.add("upload-detail-open");
+  document.body.classList.add("upload-detail-open");
+}
+
+function unlockUploadPageScroll({ restoreScroll = true } = {}) {
+  if (!uploadSareeState.pageScrollLocked) return;
+  const scrollY = uploadSareeState.savedPageScrollY;
+  uploadSareeState.pageScrollLocked = false;
+  document.documentElement.classList.remove("upload-detail-open");
+  document.body.classList.remove("upload-detail-open");
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  document.body.style.width = "";
+  if (restoreScroll) window.scrollTo(0, scrollY);
+}
+
+function restoreUploadNavigationAfterMutation() {
+  const navigation = uploadSareeState.returnNavigation;
+  uploadSareeState.returnNavigation = null;
+  requestAnimationFrame(() => {
+    const targetIds = [navigation?.nextRowId, navigation?.previousRowId].filter(Boolean);
+    const target = targetIds
+      .map((rowId) => document.querySelector(`#uploadRecentRows [data-upload-row-id="${CSS.escape(String(rowId))}"]`))
+      .find(Boolean);
+    if (target) target.scrollIntoView({ block: "center" });
+    else window.scrollTo(0, navigation?.scrollY || uploadSareeState.savedPageScrollY || 0);
+  });
+}
+
 function openUploadDetail(rowId) {
   const row = uploadSareeState.rows.filter(shouldShowUploadReviewRow).find((item) => Number(item.rowId) === Number(rowId));
   if (!row) return;
+  captureUploadReturnNavigation(rowId);
   uploadSareeState.detailOpen = true;
   uploadSareeState.currentRowId = rowId;
   uploadSareeState.selectedRowId = rowId;
@@ -731,8 +850,7 @@ function openUploadDetail(rowId) {
   uploadSareeState.currentDetailSignature = getUploadDetailSignature(row);
   uploadSareeState.detailLastScrollTop = 0;
   uploadSareeState.detailHeaderHidden = false;
-  document.documentElement.classList.add("upload-detail-open");
-  document.body.classList.add("upload-detail-open");
+  lockUploadPageScroll();
   getUploadDetailHeader()?.classList.remove("header-hidden");
   renderUploadDetail(row, { keepOpen: false, preserveGeneratedKey: true });
   document.getElementById("uploadDetailBackdrop").classList.add("open");
@@ -743,7 +861,7 @@ function openUploadDetail(rowId) {
   });
 }
 
-function closeUploadDetail({ refreshAfterClose = true } = {}) {
+function closeUploadDetail({ refreshAfterClose = true, restoreScroll = true, preserveNavigation = false } = {}) {
   const shouldRefresh = refreshAfterClose && uploadSareeState.syncAfterDetailClose && uploadSareeState.active;
   uploadSareeState.detailOpen = false;
   uploadSareeState.currentRowId = null;
@@ -751,12 +869,12 @@ function closeUploadDetail({ refreshAfterClose = true } = {}) {
   uploadSareeState.detailLastScrollTop = 0;
   uploadSareeState.detailHeaderHidden = false;
   uploadSareeState.syncAfterDetailClose = false;
-  document.documentElement.classList.remove("upload-detail-open");
-  document.body.classList.remove("upload-detail-open");
+  unlockUploadPageScroll({ restoreScroll });
   getUploadDetailHeader()?.classList.remove("header-hidden");
   closeUploadReviewActions();
   closeUploadImageFullscreen();
   document.getElementById("uploadDetailBackdrop").classList.remove("open");
+  if (!preserveNavigation) uploadSareeState.returnNavigation = null;
   if (shouldRefresh) {
     loadRecentUploadSarees({ force: false, preserveDetail: false, silent: true });
   }
@@ -813,7 +931,7 @@ function renderUploadGeneratedStage(row, key, url) {
   if (!stage) return;
   const tab = UPLOAD_GENERATED_TABS.find((item) => item.key === key) || UPLOAD_GENERATED_TABS[0];
   stage.innerHTML = hasUploadImage(url)
-    ? renderUploadImage(url, tab.label)
+    ? renderUploadZoomableImage(url, url, tab.label)
     : `<div class="upload-empty-media">${uploadGeneratedPlaceholder(row, key)}</div>`;
 }
 
@@ -838,6 +956,44 @@ function openUploadImageFullscreen(event) {
     return;
   }
 
+  const tab = UPLOAD_GENERATED_TABS.find((item) => item.key === uploadSareeState.selectedGeneratedKey);
+  openUploadImageViewer(url, tab?.label || "Generated output");
+}
+
+function updateUploadViewerTransform() {
+  const image = document.getElementById("uploadFullscreenImage");
+  const percent = document.getElementById("uploadZoomPercent");
+  const zoomOut = document.getElementById("uploadZoomOut");
+  const zoomIn = document.getElementById("uploadZoomIn");
+  if (image) {
+    image.style.transform = `translate3d(${uploadSareeState.viewerX}px, ${uploadSareeState.viewerY}px, 0) scale(${uploadSareeState.viewerScale})`;
+  }
+  if (percent) percent.textContent = `${Math.round(uploadSareeState.viewerScale * 100)}%`;
+  if (zoomOut) zoomOut.disabled = uploadSareeState.viewerScale <= 0.5;
+  if (zoomIn) zoomIn.disabled = uploadSareeState.viewerScale >= 4;
+}
+
+function setUploadViewerScale(nextScale) {
+  uploadSareeState.viewerScale = Math.min(4, Math.max(0.5, nextScale));
+  uploadSareeState.viewerFit = uploadSareeState.viewerScale === 1
+    && uploadSareeState.viewerX === 0
+    && uploadSareeState.viewerY === 0;
+  if (uploadSareeState.viewerScale <= 1) {
+    uploadSareeState.viewerX = 0;
+    uploadSareeState.viewerY = 0;
+  }
+  updateUploadViewerTransform();
+}
+
+function fitUploadViewer() {
+  uploadSareeState.viewerScale = 1;
+  uploadSareeState.viewerX = 0;
+  uploadSareeState.viewerY = 0;
+  uploadSareeState.viewerFit = true;
+  updateUploadViewerTransform();
+}
+
+function openUploadImageViewer(url, label = "Upload image") {
   const viewer = document.getElementById("uploadImageFullscreen");
   const image = document.getElementById("uploadFullscreenImage");
   if (!viewer || !image) {
@@ -847,11 +1003,13 @@ function openUploadImageFullscreen(event) {
   }
 
   image.src = url;
-  image.alt = "Generated saree full screen";
+  image.alt = label;
+  fitUploadViewer();
   viewer.classList.add("open");
   viewer.setAttribute("aria-hidden", "false");
   document.documentElement.classList.add("upload-fullscreen-open");
   document.body.classList.add("upload-fullscreen-open");
+  document.getElementById("uploadFullscreenClose")?.focus({ preventScroll: true });
 }
 
 function closeUploadImageFullscreen(event) {
@@ -863,8 +1021,69 @@ function closeUploadImageFullscreen(event) {
   viewer?.classList.remove("open");
   viewer?.setAttribute("aria-hidden", "true");
   if (image) image.removeAttribute("src");
+  uploadSareeState.viewerPointers.clear();
+  uploadSareeState.viewerPinchDistance = 0;
+  fitUploadViewer();
   document.documentElement.classList.remove("upload-fullscreen-open");
   document.body.classList.remove("upload-fullscreen-open");
+}
+
+function handleUploadZoomClick(event) {
+  const trigger = event.target.closest("[data-upload-zoom-url]");
+  if (!trigger) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openUploadImageViewer(trigger.dataset.uploadZoomUrl, trigger.dataset.uploadZoomLabel || "Upload image");
+}
+
+function handleUploadViewerWheel(event) {
+  if (!document.getElementById("uploadImageFullscreen")?.classList.contains("open")) return;
+  event.preventDefault();
+  setUploadViewerScale(uploadSareeState.viewerScale + (event.deltaY < 0 ? 0.2 : -0.2));
+}
+
+function uploadPointerDistance(points) {
+  if (points.length < 2) return 0;
+  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+}
+
+function handleUploadViewerPointerDown(event) {
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  uploadSareeState.viewerPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  uploadSareeState.viewerPinchDistance = uploadPointerDistance(Array.from(uploadSareeState.viewerPointers.values()));
+}
+
+function handleUploadViewerPointerMove(event) {
+  const previous = uploadSareeState.viewerPointers.get(event.pointerId);
+  if (!previous) return;
+  const next = { x: event.clientX, y: event.clientY };
+  uploadSareeState.viewerPointers.set(event.pointerId, next);
+  const points = Array.from(uploadSareeState.viewerPointers.values());
+  if (points.length >= 2) {
+    const distance = uploadPointerDistance(points);
+    if (uploadSareeState.viewerPinchDistance > 0) {
+      setUploadViewerScale(uploadSareeState.viewerScale * (distance / uploadSareeState.viewerPinchDistance));
+    }
+    uploadSareeState.viewerPinchDistance = distance;
+    return;
+  }
+  if (uploadSareeState.viewerScale > 1) {
+    uploadSareeState.viewerX += next.x - previous.x;
+    uploadSareeState.viewerY += next.y - previous.y;
+    uploadSareeState.viewerFit = false;
+    updateUploadViewerTransform();
+  }
+}
+
+function handleUploadViewerPointerEnd(event) {
+  uploadSareeState.viewerPointers.delete(event.pointerId);
+  uploadSareeState.viewerPinchDistance = uploadPointerDistance(Array.from(uploadSareeState.viewerPointers.values()));
+}
+
+function handleUploadViewerKeydown(event) {
+  if (event.key === "Escape" && document.getElementById("uploadImageFullscreen")?.classList.contains("open")) {
+    closeUploadImageFullscreen(event);
+  }
 }
 
 function handleUploadFullscreenBackdrop(event) {
@@ -882,6 +1101,7 @@ function updateUploadGeneratedTabs() {
 async function selectUploadGenerated(key) {
   const row = currentUploadRow();
   if (!row) return;
+  if (!getAvailableUploadGeneratedTabs(row).some((tab) => tab.key === key)) return;
   const url = getUploadGeneratedImage(row, key);
   if (!hasUploadImage(url)) {
     uploadSareeState.selectedGeneratedKey = key;
@@ -1135,6 +1355,9 @@ async function updateUploadStatus(action, event) {
   setUploadActionLoading(true);
   try {
     const approvedRowId = row.rowId;
+    if (!uploadSareeState.returnNavigation || Number(uploadSareeState.returnNavigation.rowId) !== Number(approvedRowId)) {
+      captureUploadReturnNavigation(approvedRowId);
+    }
     const result = await uploadApiCall(`/api/upload-saree/${row.rowId}/${action}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1145,10 +1368,11 @@ async function updateUploadStatus(action, event) {
     }
     closeUploadReviewActions();
     closeUploadImageFullscreen();
-    closeUploadDetail({ refreshAfterClose: false });
+    closeUploadDetail({ refreshAfterClose: false, restoreScroll: false, preserveNavigation: true });
     uploadSareeState.rows = uploadSareeState.rows.filter((item) => Number(item.rowId) !== Number(approvedRowId));
     uploadSareeState.lastRowsSignature = "";
-    renderUploadRows();
+    renderUploadRows({ preserveViewport: false });
+    restoreUploadNavigationAfterMutation();
     showUploadToast(action === "approve"
       ? "Saree approved successfully."
       : action === "reject"
@@ -1454,7 +1678,7 @@ function renderUploadRolePreview(role) {
   const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
   preview.innerHTML = `
     <div class="upload-selected-file">
-      <img src="${uploadEscapeAttr(url)}" alt="${uploadEscapeAttr(file.name)}" />
+      ${renderUploadZoomableImage(url, url, file.name)}
       <div>
         <strong>${uploadEscapeHtml(file.name)}</strong>
         <span>${sizeMb} MB</span>
@@ -1474,6 +1698,17 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("uploadCancelButton")?.addEventListener("click", cancelUploadSaree);
   bindUploadDetailActions();
   enhanceUploadFileInputs();
+  document.addEventListener("click", handleUploadZoomClick);
+  document.addEventListener("keydown", handleUploadViewerKeydown);
+  document.getElementById("uploadZoomOut")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale - 0.25));
+  document.getElementById("uploadZoomIn")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale + 0.25));
+  document.getElementById("uploadZoomFit")?.addEventListener("click", fitUploadViewer);
+  const viewerStage = document.getElementById("uploadFullscreenStage");
+  viewerStage?.addEventListener("wheel", handleUploadViewerWheel, { passive: false });
+  viewerStage?.addEventListener("pointerdown", handleUploadViewerPointerDown);
+  viewerStage?.addEventListener("pointermove", handleUploadViewerPointerMove);
+  viewerStage?.addEventListener("pointerup", handleUploadViewerPointerEnd);
+  viewerStage?.addEventListener("pointercancel", handleUploadViewerPointerEnd);
 });
 
 window.openUploadImageFullscreen = openUploadImageFullscreen;

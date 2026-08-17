@@ -1398,7 +1398,6 @@
           <p class="upload-subtitle">Create upload rows for saree generation and review generated outputs when Baserow updates them.</p>
         </div>
         <div class="upload-top-actions">
-          <div class="upload-sync-copy">Live Sync · Auto 15s<br><span id="uploadUpdatedAt">Updated: --:--:--</span></div>
           <button class="upload-btn" type="button" onclick="syncUploadSareesNow()">Sync Now</button>
         </div>
       </header>
@@ -1477,7 +1476,7 @@
             <div id="uploadReferenceImages" class="upload-media-grid"></div>
           </section>
           <section class="compare-panel generated-panel">
-            <h3>Generated Front View</h3>
+            <h3>Generated Outputs</h3>
             <div id="uploadGeneratedTabs" class="upload-generated-tabs"></div>
             <div class="upload-generated-image-wrap">
               <div id="uploadGeneratedPreview" class="upload-generated-preview upload-generated-stage"></div>
@@ -1546,6 +1545,9 @@
     id="uploadImageFullscreen"
     class="upload-image-fullscreen"
     aria-hidden="true"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Image viewer"
     onclick="handleUploadFullscreenBackdrop(event)"
   >
     <button
@@ -1555,7 +1557,13 @@
       onclick="closeUploadImageFullscreen(event)"
       aria-label="Close full screen image"
     >x</button>
-    <div class="upload-fullscreen-stage" onclick="event.stopPropagation()">
+    <div class="upload-fullscreen-toolbar" onclick="event.stopPropagation()" aria-label="Image zoom controls">
+      <button id="uploadZoomOut" type="button" aria-label="Zoom out">-</button>
+      <output id="uploadZoomPercent" aria-live="polite">100%</output>
+      <button id="uploadZoomIn" type="button" aria-label="Zoom in">+</button>
+      <button id="uploadZoomFit" type="button">Fit</button>
+    </div>
+    <div id="uploadFullscreenStage" class="upload-fullscreen-stage" onclick="event.stopPropagation()">
       <img id="uploadFullscreenImage" alt="" />
     </div>
   </div>
