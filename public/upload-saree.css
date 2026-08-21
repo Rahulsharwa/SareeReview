@@ -313,6 +313,28 @@
 
 .upload-selected-file img { object-fit: contain; }
 
+.upload-selected-file-converting {
+  grid-template-columns: 48px 1fr;
+}
+
+.upload-conversion-spinner {
+  width: 30px;
+  height: 30px;
+  justify-self: center;
+  border: 3px solid #eadcc5;
+  border-top-color: var(--upload-maroon);
+  border-radius: 50%;
+  animation: upload-conversion-spin .8s linear infinite;
+}
+
+@keyframes upload-conversion-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-conversion-spinner { animation: none; }
+}
+
 .upload-selected-file strong,
 .upload-selected-file span {
   display: block;

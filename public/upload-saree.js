@@ -7,7 +7,7 @@ const UPLOAD_API = {
   reviewAuth: "/api/review-auth",
 };
 
-window.JSH_UPLOAD_BUILD = "blob-client-upload-v3";
+window.JSH_UPLOAD_BUILD = "blob-client-upload-v4-heic";
 
 const uploadSareeState = {
   active: false,
@@ -41,6 +41,12 @@ const uploadSareeState = {
   clientTimeoutMs: 900000,
   allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png", "image/webp"],
   isUploading: false,
+  isConverting: false,
+  conversionWorkCount: 0,
+  conversionQueue: Promise.resolve(),
+  conversionIds: { saree: 0, blouse: 0, pallu: 0, border: 0 },
+  convertingRoles: { saree: false, blouse: false, pallu: false, border: false },
+  files: { saree: null, blouse: null, pallu: null, border: null },
   uploadCancelled: false,
   uploadTimedOut: false,
   uploadAbortController: null,
@@ -64,8 +70,19 @@ const uploadSareeState = {
   },
 };
 
-const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
-const ALLOWED_UPLOAD_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif"]);
+const HEIC_UPLOAD_MIME_TYPES = new Set(["image/heic", "image/heif"]);
+const HEIC_UPLOAD_EXTENSIONS = new Set(["heic", "heif"]);
+const STORED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+const STORED_UPLOAD_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp"]);
 const UPLOAD_REFERENCE_ROLES = ["saree", "blouse", "pallu", "border"];
 const UPLOAD_ROLE_CONFIG = {
   saree: { label: "Saree Image", inputId: "uploadSareeImage", inputName: "sareeImage", required: true },
@@ -379,20 +396,38 @@ function getFileExtension(filename) {
   return String(filename || "").split(".").pop().toLowerCase();
 }
 
+function isHeicUploadFile(file) {
+  if (!file) return false;
+  const mimeType = String(file.type || "").trim().toLowerCase();
+  return HEIC_UPLOAD_MIME_TYPES.has(mimeType) || HEIC_UPLOAD_EXTENSIONS.has(getFileExtension(file.name));
+}
+
 function validateUploadImageFile(file, label) {
   if (!file) return;
-  const mimeType = String(file.type || "").toLowerCase();
-  if (!ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)) {
-    throw new Error(`${label} must be a JPG, PNG, or WEBP image.`);
+  const mimeType = String(file.type || "").trim().toLowerCase();
+  const extension = getFileExtension(file.name);
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(extension) || (mimeType && !ALLOWED_UPLOAD_MIME_TYPES.has(mimeType))) {
+    throw new Error("Only JPG, PNG, WEBP, HEIC, and HEIF images are allowed.");
   }
-  if (!ALLOWED_UPLOAD_EXTENSIONS.has(getFileExtension(file.name))) {
-    throw new Error(`${label} must use a .jpg, .jpeg, .png, or .webp extension.`);
+  if (!mimeType && !HEIC_UPLOAD_EXTENSIONS.has(extension)) {
+    throw new Error("Only JPG, PNG, WEBP, HEIC, and HEIF images are allowed.");
   }
   if (file.size > getMaxUploadSizeBytes()) {
-    throw new Error(`The selected ${label} exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
+    throw new Error(`The selected image exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
   }
   if (file.size <= 0) {
     throw new Error(`${label} is empty.`);
+  }
+}
+
+function validateStoredUploadImageFile(file) {
+  const mimeType = String(file?.type || "").trim().toLowerCase();
+  const extension = getFileExtension(file?.name);
+  if (!(file instanceof File) || !STORED_UPLOAD_MIME_TYPES.has(mimeType) || !STORED_UPLOAD_EXTENSIONS.has(extension)) {
+    throw new Error("The image could not be prepared for upload.");
+  }
+  if (file.size <= 0 || file.size > getMaxUploadSizeBytes()) {
+    throw new Error(`The selected image exceeds the maximum allowed size of ${uploadSareeState.maxFileSizeMb} MB.`);
   }
 }
 
@@ -408,29 +443,38 @@ function getUploadRoleInput(role) {
 function getSelectedUploadFiles() {
   return UPLOAD_REFERENCE_ROLES.map((role) => {
     const config = getUploadRoleConfig(role);
+    const selection = uploadSareeState.files[role];
     return {
       role,
       label: config.label,
-      file: uploadSareeState[`${role}File`] || null,
+      file: selection?.uploadFile || null,
+      originalFile: selection?.originalFile || null,
+      wasConvertedFromHeic: Boolean(selection?.wasConvertedFromHeic),
       required: config.required,
     };
   }).filter((item) => item.file instanceof File);
 }
 
 function validateSelectedUploadFiles() {
+  if (uploadSareeState.isConverting) {
+    throw new Error("Please wait for HEIC conversion to finish.");
+  }
   const selectedItems = getSelectedUploadFiles();
   const configuredMaximum = Number(uploadSareeState.publicConfig?.maxUploadFiles || UPLOAD_REFERENCE_ROLES.length);
   const maxUploadFiles = configuredMaximum === UPLOAD_REFERENCE_ROLES.length
     ? configuredMaximum
     : UPLOAD_REFERENCE_ROLES.length;
 
-  if (!(uploadSareeState.sareeFile instanceof File)) {
+  if (!selectedItems.some((item) => item.role === "saree")) {
     throw new Error("Please upload Saree Image.");
   }
   if (selectedItems.length > maxUploadFiles) {
     throw new Error(`Maximum ${maxUploadFiles} images are allowed per upload.`);
   }
-  selectedItems.forEach((item) => validateUploadImageFile(item.file, item.label));
+  selectedItems.forEach((item) => {
+    validateUploadImageFile(item.originalFile, item.label);
+    validateStoredUploadImageFile(item.file);
+  });
   return selectedItems;
 }
 
@@ -478,6 +522,28 @@ function setUploadControlsDisabled(disabled) {
     }
     control.disabled = Boolean(disabled);
   });
+  if (!disabled) syncUploadConversionControls();
+}
+
+function syncUploadConversionControls() {
+  const submitButton = document.getElementById("uploadSubmitBtn");
+  if (submitButton && !uploadSareeState.isUploading) {
+    submitButton.disabled = uploadSareeState.isConverting;
+  }
+}
+
+function setUploadRoleConverting(role, converting) {
+  uploadSareeState.convertingRoles[role] = Boolean(converting);
+  uploadSareeState.isConverting = uploadSareeState.conversionWorkCount > 0
+    || Object.values(uploadSareeState.convertingRoles).some(Boolean);
+  syncUploadConversionControls();
+}
+
+function finishUploadConversionWork() {
+  uploadSareeState.conversionWorkCount = Math.max(0, uploadSareeState.conversionWorkCount - 1);
+  uploadSareeState.isConverting = uploadSareeState.conversionWorkCount > 0
+    || Object.values(uploadSareeState.convertingRoles).some(Boolean);
+  syncUploadConversionControls();
 }
 
 function getUploadInputValue(form, name) {
@@ -514,7 +580,7 @@ async function loadUploadStatus() {
     uploadSareeState.clientTimeoutMs = Number(data.clientTimeoutMs || 900000);
     if (Array.isArray(data.allowedMimeTypes)) uploadSareeState.allowedMimeTypes = data.allowedMimeTypes;
     populateUploadCategorySelect(data.categoryGroups);
-    document.getElementById("uploadMaxSizeText").textContent = `JPG, PNG, WEBP - Max ${uploadSareeState.maxFileSizeMb} MB per image`;
+    document.getElementById("uploadMaxSizeText").textContent = `JPG, JPEG, PNG, WEBP, HEIC, HEIF - Max ${uploadSareeState.maxFileSizeMb} MB per image`;
     panel.className = `upload-status ${data.ok ? "ok" : "error"}`;
     panel.textContent = data.ok
       ? `Upload backend connected - Table ${data.tableId}`
@@ -1130,6 +1196,10 @@ async function submitUploadSaree(event) {
   event.preventDefault();
   const form = event.currentTarget;
   if (uploadSareeState.isUploading) return;
+  if (uploadSareeState.isConverting) {
+    showUploadToast("Please wait for HEIC conversion to finish.", true);
+    return;
+  }
   clearUploadError();
 
   const config = uploadSareeState.publicConfig || {};
@@ -1512,8 +1582,11 @@ function stopUploadAutoSync() {
 
 function clearUploadRoleFile(role, { revokePreview = true, render = true, clearMessage = true } = {}) {
   if (!UPLOAD_REFERENCE_ROLES.includes(role)) return;
+  uploadSareeState.conversionIds[role] += 1;
+  setUploadRoleConverting(role, false);
   const previewUrl = uploadSareeState.previewUrls?.[role];
   if (revokePreview && previewUrl) URL.revokeObjectURL(previewUrl);
+  uploadSareeState.files[role] = null;
   uploadSareeState[`${role}File`] = null;
   uploadSareeState.previewUrls[role] = null;
   uploadSareeState.fileProgress[role] = 0;
@@ -1589,6 +1662,7 @@ function enhanceUploadFileInputs() {
     const browse = document.createElement("button");
     browse.type = "button";
     browse.className = "upload-btn";
+    browse.dataset.uploadBrowseRole = input.name;
     browse.textContent = "Browse";
     browse.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1597,7 +1671,7 @@ function enhanceUploadFileInputs() {
 
     const hint = document.createElement("div");
     hint.className = "upload-file-hint";
-    hint.textContent = "Drag and drop or choose JPG, PNG, WEBP";
+    hint.textContent = "Drag and drop or choose JPG, JPEG, PNG, WEBP, HEIC, HEIF";
 
     const preview = document.createElement("div");
     preview.className = "upload-file-preview";
@@ -1625,14 +1699,14 @@ function enhanceUploadFileInputs() {
         const transfer = new DataTransfer();
         transfer.items.add(event.dataTransfer.files[0]);
         input.files = transfer.files;
-        renderUploadFilePreview(input);
+        void renderUploadFilePreview(input);
       }
     });
-    input.addEventListener("change", () => renderUploadFilePreview(input));
+    input.addEventListener("change", () => void renderUploadFilePreview(input));
   });
 }
 
-function renderUploadFilePreview(input) {
+async function renderUploadFilePreview(input) {
   const file = input.files?.[0];
   const role = UPLOAD_REFERENCE_ROLES.find((candidate) => getUploadRoleConfig(candidate).inputName === input.name);
   if (!role) return;
@@ -1641,7 +1715,7 @@ function renderUploadFilePreview(input) {
     return;
   }
   try {
-    setUploadRoleFile(role, file);
+    await setUploadRoleFile(role, file);
   } catch (error) {
     input.value = "";
     setUploadMessage(error.message || "Unable to select image.", true);
@@ -1649,17 +1723,94 @@ function renderUploadFilePreview(input) {
   }
 }
 
-function setUploadRoleFile(role, file) {
+function setPreparedUploadRoleFile(role, originalFile, uploadFile, wasConvertedFromHeic, conversionId) {
+  if (uploadSareeState.conversionIds[role] !== conversionId) return false;
+  validateStoredUploadImageFile(uploadFile);
+  const previousPreviewUrl = uploadSareeState.previewUrls?.[role];
+  if (previousPreviewUrl) URL.revokeObjectURL(previousPreviewUrl);
+  uploadSareeState.files[role] = {
+    originalFile,
+    uploadFile,
+    wasConvertedFromHeic,
+    status: "ready",
+  };
+  uploadSareeState[`${role}File`] = uploadFile;
+  uploadSareeState.previewUrls[role] = URL.createObjectURL(uploadFile);
+  uploadSareeState.fileProgress[role] = 0;
+  renderUploadRolePreview(role);
+  return true;
+}
+
+async function setUploadRoleFile(role, file) {
   const config = getUploadRoleConfig(role);
   if (!config) throw new Error("Invalid reference image role.");
   validateUploadImageFile(file, config.label);
+
+  const conversionId = uploadSareeState.conversionIds[role] + 1;
+  uploadSareeState.conversionIds[role] = conversionId;
   const previousPreviewUrl = uploadSareeState.previewUrls?.[role];
   if (previousPreviewUrl) URL.revokeObjectURL(previousPreviewUrl);
-  uploadSareeState[`${role}File`] = file;
-  uploadSareeState.previewUrls[role] = URL.createObjectURL(file);
+  uploadSareeState.previewUrls[role] = null;
+  uploadSareeState[`${role}File`] = null;
   uploadSareeState.fileProgress[role] = 0;
-  clearUploadError();
+
+  if (!isHeicUploadFile(file)) {
+    setUploadRoleConverting(role, false);
+    setPreparedUploadRoleFile(role, file, file, false, conversionId);
+    clearUploadError();
+    return;
+  }
+
+  uploadSareeState.files[role] = {
+    originalFile: file,
+    uploadFile: null,
+    wasConvertedFromHeic: true,
+    status: "preparing",
+  };
+  uploadSareeState.conversionWorkCount += 1;
+  setUploadRoleConverting(role, true);
+  setUploadMessage("Preparing HEIC image...");
   renderUploadRolePreview(role);
+
+  const convertSelection = async () => {
+    if (uploadSareeState.conversionIds[role] !== conversionId) return;
+    const converter = window.uploadSareeHeic?.convertHeicToJpeg;
+    if (typeof converter !== "function") {
+      throw new Error("HEIC conversion is not available. Please refresh and try again.");
+    }
+    uploadSareeState.files[role].status = "converting";
+    setUploadMessage("Converting HEIC to JPEG...");
+    renderUploadRolePreview(role);
+
+    const convertedFile = await converter(file, { quality: 0.94 });
+    if (uploadSareeState.conversionIds[role] !== conversionId) return;
+    setPreparedUploadRoleFile(role, file, convertedFile, true, conversionId);
+    setUploadMessage("Ready to upload");
+  };
+
+  uploadSareeState.conversionQueue = uploadSareeState.conversionQueue
+    .catch(() => undefined)
+    .then(convertSelection)
+    .catch((error) => {
+      if (uploadSareeState.conversionIds[role] !== conversionId) return;
+      uploadSareeState.files[role] = null;
+      uploadSareeState[`${role}File`] = null;
+      uploadSareeState.previewUrls[role] = null;
+      const input = getUploadRoleInput(role);
+      if (input) input.value = "";
+      renderUploadRolePreview(role);
+      setUploadMessage(error.message || "The HEIC image could not be converted. Please try another image.", true);
+      showUploadToast(error.message || "The HEIC image could not be converted. Please try another image.", true);
+    })
+    .finally(() => {
+      finishUploadConversionWork();
+      if (uploadSareeState.conversionIds[role] === conversionId) {
+        setUploadRoleConverting(role, false);
+        renderUploadRolePreview(role);
+      }
+    });
+
+  await uploadSareeState.conversionQueue;
 }
 
 function renderUploadRolePreview(role) {
@@ -1667,23 +1818,48 @@ function renderUploadRolePreview(role) {
   const input = getUploadRoleInput(role);
   const preview = input?.closest(".upload-file")?.querySelector(".upload-file-preview");
   if (!config || !preview) return;
-  const file = uploadSareeState[`${role}File`];
+  const selection = uploadSareeState.files[role];
+  const file = selection?.uploadFile;
+  const originalFile = selection?.originalFile;
   const url = uploadSareeState.previewUrls?.[role];
   preview.innerHTML = "";
-  if (!(file instanceof File) || !url) return;
-  const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+
+  if (selection?.status === "preparing" || selection?.status === "converting") {
+    const statusText = selection.status === "preparing" ? "Preparing HEIC image..." : "Converting HEIC to JPEG...";
+    const originalSizeMb = (originalFile.size / (1024 * 1024)).toFixed(2);
+    preview.innerHTML = `
+      <div class="upload-selected-file upload-selected-file-converting" role="status" aria-live="polite">
+        <span class="upload-conversion-spinner" aria-hidden="true"></span>
+        <div>
+          <strong>${uploadEscapeHtml(originalFile.name)}</strong>
+          <span>${originalSizeMb} MB</span>
+          <span>${uploadEscapeHtml(statusText)}</span>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (!(file instanceof File) || !(originalFile instanceof File) || !url) return;
+  const uploadSizeMb = (file.size / (1024 * 1024)).toFixed(2);
+  const fileDetails = selection.wasConvertedFromHeic
+    ? `<span>Original: ${uploadEscapeHtml(originalFile.name)} - ${(originalFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+       <span>Upload: ${uploadEscapeHtml(file.name)} - ${uploadSizeMb} MB</span>
+       <span>Converted to JPEG for upload</span>`
+    : `<span>${uploadSizeMb} MB</span>`;
   preview.innerHTML = `
     <div class="upload-selected-file">
       ${renderUploadZoomableImage(url, url, file.name)}
       <div>
-        <strong>${uploadEscapeHtml(file.name)}</strong>
-        <span>${sizeMb} MB</span>
+        <strong>${uploadEscapeHtml(originalFile.name)}</strong>
+        ${fileDetails}
       </div>
       <button class="upload-icon-btn" type="button">Remove</button>
     </div>
   `;
-  preview.querySelector("button")?.addEventListener("click", (event) => {
+  preview.querySelector(".upload-icon-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     clearUploadRoleFile(role);
   });
 }
