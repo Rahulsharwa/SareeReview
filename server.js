@@ -56,6 +56,10 @@ const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
 const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
 const MAX_UPLOAD_SIZE_MB = Math.max(1, Math.min(Number(process.env.MAX_UPLOAD_SIZE_MB || 50), 50));
 const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+const MAX_HEIC_DECODE_PIXELS = Math.max(
+  1000000,
+  Math.min(Number(process.env.MAX_HEIC_DECODE_PIXELS || 100000000), 200000000),
+);
 const UPLOAD_REFERENCE_ROLES = ["saree", "blouse", "pallu", "border"];
 const ALLOWED_UPLOAD_ROLES = new Set(UPLOAD_REFERENCE_ROLES);
 const CONFIGURED_UPLOAD_MAX_FILES = Math.max(
@@ -2029,6 +2033,7 @@ function getUploadConfigStatus() {
     missing,
     maxFileSizeMb: MAX_UPLOAD_SIZE_MB,
     maxUploadSizeMb: MAX_UPLOAD_SIZE_MB,
+    maxHeicDecodePixels: MAX_HEIC_DECODE_PIXELS,
     maxFiles: UPLOAD_MAX_FILES,
     maxUploadFiles: UPLOAD_MAX_FILES,
     allowedMimeTypes: Array.from(UPLOAD_IMAGE_MIME_TYPES),

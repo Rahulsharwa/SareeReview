@@ -317,6 +317,24 @@
   grid-template-columns: 48px 1fr;
 }
 
+.upload-selected-file-error {
+  grid-template-columns: 48px 1fr auto;
+  border-color: #efb2aa;
+  background: #fff7f5;
+}
+
+.upload-file-error-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border-radius: 50%;
+  background: var(--upload-red);
+  color: #fff;
+  font-weight: 950;
+}
+
 .upload-conversion-spinner {
   width: 30px;
   height: 30px;

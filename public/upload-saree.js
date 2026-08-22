@@ -7,7 +7,7 @@ const UPLOAD_API = {
   reviewAuth: "/api/review-auth",
 };
 
-window.JSH_UPLOAD_BUILD = "blob-client-upload-v4-heic";
+window.JSH_UPLOAD_BUILD = "blob-client-upload-v5-heic-png";
 
 const uploadSareeState = {
   active: false,
@@ -17,6 +17,7 @@ const uploadSareeState = {
   selectedGeneratedKey: "front",
   syncTimer: null,
   maxFileSizeMb: 10,
+  maxHeicDecodePixels: 100000000,
   detailOpen: false,
   currentRowId: null,
   loadingRecent: false,
@@ -449,7 +450,7 @@ function getSelectedUploadFiles() {
       label: config.label,
       file: selection?.uploadFile || null,
       originalFile: selection?.originalFile || null,
-      wasConvertedFromHeic: Boolean(selection?.wasConvertedFromHeic),
+      convertedFromHeic: Boolean(selection?.convertedFromHeic),
       required: config.required,
     };
   }).filter((item) => item.file instanceof File);
@@ -528,7 +529,9 @@ function setUploadControlsDisabled(disabled) {
 function syncUploadConversionControls() {
   const submitButton = document.getElementById("uploadSubmitBtn");
   if (submitButton && !uploadSareeState.isUploading) {
-    submitButton.disabled = uploadSareeState.isConverting;
+    const hasUnreadySelection = Object.values(uploadSareeState.files)
+      .some((selection) => selection && !(selection.uploadFile instanceof File));
+    submitButton.disabled = uploadSareeState.isConverting || hasUnreadySelection;
   }
 }
 
@@ -576,6 +579,7 @@ async function loadUploadStatus() {
     const data = await uploadApiCall(UPLOAD_API.status);
     uploadSareeState.publicConfig = data || {};
     uploadSareeState.maxFileSizeMb = Number(data.maxUploadSizeMb || data.maxFileSizeMb || 50);
+    uploadSareeState.maxHeicDecodePixels = Number(data.maxHeicDecodePixels || 100000000);
     uploadSareeState.directStorageEnabled = Boolean(data.directStorageEnabled);
     uploadSareeState.clientTimeoutMs = Number(data.clientTimeoutMs || 900000);
     if (Array.isArray(data.allowedMimeTypes)) uploadSareeState.allowedMimeTypes = data.allowedMimeTypes;
@@ -1592,6 +1596,7 @@ function clearUploadRoleFile(role, { revokePreview = true, render = true, clearM
   uploadSareeState.fileProgress[role] = 0;
   const input = getUploadRoleInput(role);
   if (input) input.value = "";
+  syncUploadConversionControls();
   if (render) renderUploadRolePreview(role);
   if (clearMessage) clearUploadError();
 }
@@ -1723,7 +1728,7 @@ async function renderUploadFilePreview(input) {
   }
 }
 
-function setPreparedUploadRoleFile(role, originalFile, uploadFile, wasConvertedFromHeic, conversionId) {
+function setPreparedUploadRoleFile(role, originalFile, uploadFile, convertedFromHeic, conversionId, diagnostics = {}) {
   if (uploadSareeState.conversionIds[role] !== conversionId) return false;
   validateStoredUploadImageFile(uploadFile);
   const previousPreviewUrl = uploadSareeState.previewUrls?.[role];
@@ -1731,12 +1736,15 @@ function setPreparedUploadRoleFile(role, originalFile, uploadFile, wasConvertedF
   uploadSareeState.files[role] = {
     originalFile,
     uploadFile,
-    wasConvertedFromHeic,
+    convertedFromHeic,
     status: "ready",
+    sourceDimensions: diagnostics.sourceDimensions || null,
+    dimensions: diagnostics.dimensions || null,
   };
   uploadSareeState[`${role}File`] = uploadFile;
   uploadSareeState.previewUrls[role] = URL.createObjectURL(uploadFile);
   uploadSareeState.fileProgress[role] = 0;
+  syncUploadConversionControls();
   renderUploadRolePreview(role);
   return true;
 }
@@ -1764,7 +1772,7 @@ async function setUploadRoleFile(role, file) {
   uploadSareeState.files[role] = {
     originalFile: file,
     uploadFile: null,
-    wasConvertedFromHeic: true,
+    convertedFromHeic: true,
     status: "preparing",
   };
   uploadSareeState.conversionWorkCount += 1;
@@ -1774,17 +1782,28 @@ async function setUploadRoleFile(role, file) {
 
   const convertSelection = async () => {
     if (uploadSareeState.conversionIds[role] !== conversionId) return;
-    const converter = window.uploadSareeHeic?.convertHeicToJpeg;
+    const converter = window.uploadSareeHeic?.convertHeicToLosslessPng;
     if (typeof converter !== "function") {
       throw new Error("HEIC conversion is not available. Please refresh and try again.");
     }
     uploadSareeState.files[role].status = "converting";
-    setUploadMessage("Converting HEIC to JPEG...");
+    setUploadMessage("Converting HEIC to lossless PNG...");
     renderUploadRolePreview(role);
 
-    const convertedFile = await converter(file, { quality: 0.94 });
+    const conversion = await converter(file, {
+      maxPixels: uploadSareeState.maxHeicDecodePixels,
+      maxBytes: getMaxUploadSizeBytes(),
+      maxSizeMb: uploadSareeState.maxFileSizeMb,
+    });
     if (uploadSareeState.conversionIds[role] !== conversionId) return;
-    setPreparedUploadRoleFile(role, file, convertedFile, true, conversionId);
+    setPreparedUploadRoleFile(
+      role,
+      conversion.originalFile,
+      conversion.uploadFile,
+      conversion.convertedFromHeic,
+      conversionId,
+      conversion,
+    );
     setUploadMessage("Ready to upload");
   };
 
@@ -1793,14 +1812,24 @@ async function setUploadRoleFile(role, file) {
     .then(convertSelection)
     .catch((error) => {
       if (uploadSareeState.conversionIds[role] !== conversionId) return;
-      uploadSareeState.files[role] = null;
+      const preserveSelection = error?.code === "PNG_TOO_LARGE";
+      uploadSareeState.files[role] = preserveSelection ? {
+        originalFile: file,
+        uploadFile: null,
+        convertedFromHeic: true,
+        status: "error",
+        errorMessage: error.message,
+        sourceDimensions: error.sourceDimensions || null,
+        dimensions: error.dimensions || null,
+        convertedSizeBytes: error.convertedSizeBytes || null,
+      } : null;
       uploadSareeState[`${role}File`] = null;
       uploadSareeState.previewUrls[role] = null;
       const input = getUploadRoleInput(role);
-      if (input) input.value = "";
+      if (input && !preserveSelection) input.value = "";
       renderUploadRolePreview(role);
-      setUploadMessage(error.message || "The HEIC image could not be converted. Please try another image.", true);
-      showUploadToast(error.message || "The HEIC image could not be converted. Please try another image.", true);
+      setUploadMessage(error.message || "HEIC conversion failed. The original file has not been modified.", true);
+      showUploadToast(error.message || "HEIC conversion failed. The original file has not been modified.", true);
     })
     .finally(() => {
       finishUploadConversionWork();
@@ -1825,7 +1854,7 @@ function renderUploadRolePreview(role) {
   preview.innerHTML = "";
 
   if (selection?.status === "preparing" || selection?.status === "converting") {
-    const statusText = selection.status === "preparing" ? "Preparing HEIC image..." : "Converting HEIC to JPEG...";
+    const statusText = selection.status === "preparing" ? "Preparing HEIC image..." : "Converting HEIC to lossless PNG...";
     const originalSizeMb = (originalFile.size / (1024 * 1024)).toFixed(2);
     preview.innerHTML = `
       <div class="upload-selected-file upload-selected-file-converting" role="status" aria-live="polite">
@@ -1840,12 +1869,36 @@ function renderUploadRolePreview(role) {
     return;
   }
 
+  if (selection?.status === "error" && originalFile instanceof File) {
+    preview.innerHTML = `
+      <div class="upload-selected-file upload-selected-file-error" role="alert">
+        <span class="upload-file-error-icon" aria-hidden="true">!</span>
+        <div>
+          <strong>${uploadEscapeHtml(originalFile.name)}</strong>
+          <span>${uploadEscapeHtml(selection.errorMessage || "HEIC conversion failed. The original file has not been modified.")}</span>
+        </div>
+        <button class="upload-icon-btn" type="button">Remove</button>
+      </div>
+    `;
+    preview.querySelector(".upload-icon-btn")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearUploadRoleFile(role);
+    });
+    return;
+  }
+
   if (!(file instanceof File) || !(originalFile instanceof File) || !url) return;
   const uploadSizeMb = (file.size / (1024 * 1024)).toFixed(2);
-  const fileDetails = selection.wasConvertedFromHeic
+  const dimensions = selection.dimensions;
+  const dimensionText = dimensions?.width && dimensions?.height
+    ? `<span>Full resolution: ${dimensions.width} x ${dimensions.height}px</span>`
+    : "";
+  const fileDetails = selection.convertedFromHeic
     ? `<span>Original: ${uploadEscapeHtml(originalFile.name)} - ${(originalFile.size / (1024 * 1024)).toFixed(2)} MB</span>
        <span>Upload: ${uploadEscapeHtml(file.name)} - ${uploadSizeMb} MB</span>
-       <span>Converted to JPEG for upload</span>`
+       ${dimensionText}
+       <span>Full-resolution PNG created with no additional lossy compression.</span>`
     : `<span>${uploadSizeMb} MB</span>`;
   preview.innerHTML = `
     <div class="upload-selected-file">
