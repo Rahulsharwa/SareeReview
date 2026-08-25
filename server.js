@@ -13,6 +13,7 @@ import { createClient } from "redis";
 import rateLimit from "express-rate-limit";
 import { del as deleteBlob, get as getBlob, head as headBlob } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
+import { SAREE_TABLES } from "./saree-review-config.js";
 
 dotenv.config();
 dotenv.config({ path: ".env.upload" });
@@ -33,7 +34,7 @@ const CACHE_ENABLED = String(process.env.CACHE_ENABLED || "true").toLowerCase() 
 const CACHE_PROVIDER = String(process.env.CACHE_PROVIDER || "").toLowerCase();
 const CACHE_PREFIX = process.env.CACHE_PREFIX || `jsh:saree-review:${SAREE_BASEROW_DATABASE_ID}:`;
 const CACHE_VERSION = "v4";
-const PRODUCT_MEDIA_CACHE_VERSION = "men-tie-v2";
+const PRODUCT_MEDIA_CACHE_VERSION = "review-quantity-v1";
 const MEN_ACCESSORIES_FIELD_CACHE_VERSION = "men-tie-v2";
 const CACHE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_PRODUCTS_SECONDS || process.env.CACHE_PRODUCTS_TTL || 60);
 const CACHE_COLLECTIONS_TTL = Number(process.env.CACHE_TTL_COLLECTIONS_SECONDS || process.env.CACHE_COLLECTIONS_TTL || 180);
@@ -45,6 +46,7 @@ const CACHE_STALE_PRODUCTS_TTL = Number(process.env.CACHE_TTL_STALE_PRODUCTS_SEC
 const SHOPIFY_NOTES_APPROVED_VALUE = "Approved";
 const SHOPIFY_NOTES_REJECT_VALUE = "Reject";
 const GENERATION_STATUS_FAILED_VALUE = "Failed";
+const GENERATION_STATUS_NOT_IN_STOCK_VALUE = "NOT IN STOCK";
 const SOCIAL_CACHE_VERSION = "v1";
 const SOCIAL_CACHE_KEY = `${CACHE_PREFIX}social:review-data:${SOCIAL_CACHE_VERSION}`;
 const SOCIAL_CACHE_TTL_SECONDS = Number(process.env.SOCIAL_CACHE_TTL_SECONDS || 60);
@@ -418,287 +420,6 @@ const MEDIA_PROFILES = {
   },
 };
 
-const SAREE_TABLES = [
-  {
-    name: "Kanjivaram Silks",
-    tableId: 948083,
-    fields: {
-      generationStatus: "field_8253052",
-      shopify: "field_8253055",
-      comment: "field_8253053",
-    },
-  },
-  {
-    name: "Pure Silk Sarees",
-    tableId: 935204,
-    fields: {
-      generationStatus: "field_8123033",
-      shopify: "field_8123036",
-      comment: "field_8123034",
-    },
-  },
-  {
-    name: "Tussar Silk Saree",
-    tableId: 948245,
-    fields: {
-      generationStatus: "field_8254631",
-      shopify: "field_8254634",
-      comment: "field_8254632",
-    },
-  },
-  {
-    name: "South Weaves - South Silk Sarees",
-    tableId: 935205,
-    fields: {
-      generationStatus: "field_8123050",
-      shopify: "field_8123053",
-      comment: "field_8123051",
-    },
-  },
-  {
-    name: "Soft Silk Sarees",
-    tableId: 935207,
-    fields: {
-      generationStatus: "field_8123084",
-      shopify: "field_8123087",
-      comment: "field_8123085",
-    },
-  },
-  {
-    name: "Patola & Orissa Silk Sarees",
-    tableId: 935208,
-    fields: {
-      generationStatus: "field_8123101",
-      shopify: "field_8123104",
-      comment: "field_8123102",
-    },
-  },
-  {
-    name: "Printed Pure Silk Sarees",
-    tableId: 935203,
-    fields: {
-      generationStatus: "field_8123016",
-      shopify: "field_8123019",
-      comment: "field_8123017",
-    },
-  },
-  {
-    name: "Cotton Silk Sarees",
-    tableId: 935215,
-    fields: {
-      generationStatus: "field_8123220",
-      shopify: "field_8123223",
-      comment: "field_8123221",
-    },
-  },
-  {
-    name: "Paithani Silk Sarees",
-    tableId: 935206,
-    fields: {
-      generationStatus: "field_8123067",
-      shopify: "field_8123070",
-      comment: "field_8123068",
-    },
-  },
-  {
-    name: "Banarasi Georgette Silk Sarees",
-    tableId: 935209,
-    fields: {
-      generationStatus: "field_8123118",
-      shopify: "field_8123121",
-      comment: "field_8123119",
-    },
-  },
-  {
-    name: "Banarasi Silk Sarees",
-    tableId: 935210,
-    fields: {
-      generationStatus: "field_8123135",
-      shopify: "field_8123138",
-      comment: "field_8123136",
-    },
-  },
-  {
-    name: "Banarasi Kora Silk Saree",
-    tableId: 935211,
-    fields: {
-      generationStatus: "field_8123152",
-      shopify: "field_8123155",
-      comment: "field_8123153",
-    },
-  },
-  {
-    name: "Gadwal Handloom",
-    tableId: 935213,
-    fields: {
-      generationStatus: "field_8123186",
-      shopify: "field_8123189",
-      comment: "field_8123187",
-    },
-  },
-  {
-    name: "Jamawar Silk Sarees",
-    tableId: 935214,
-    fields: {
-      generationStatus: "field_8123203",
-      shopify: "field_8123206",
-      comment: null,
-    },
-  },
-  {
-    name: "Cotton Saree",
-    tableId: 935216,
-    fields: {
-      generationStatus: "field_8123237",
-      shopify: "field_8123240",
-      comment: "field_8123238",
-    },
-  },
-  {
-    name: "Cotton Suits",
-    group: "Salwar Kameez",
-    subcategory: "Cotton Suits",
-    displayName: "Cotton Suits",
-    mediaProfile: "suit",
-    tableId: 936059,
-    fields: {
-      generationStatus: "field_8132747",
-      shopify: "field_8132750",
-      comment: "field_8132748",
-    },
-  },
-  {
-    name: "Silk Suits",
-    group: "Salwar Kameez",
-    subcategory: "Silk Suits",
-    displayName: "Silk Suits",
-    mediaProfile: "suit",
-    tableId: 936060,
-    fields: {
-      generationStatus: "field_8132764",
-      shopify: "field_8132767",
-      comment: "field_8132765",
-    },
-  },
-  {
-    name: "Linen & Kota Silk Sarees",
-    tableId: 935217,
-    fields: {
-      generationStatus: "field_8123254",
-      shopify: "field_8123257",
-      comment: "field_8123255",
-    },
-  },
-  {
-    name: "Art Silk Sarees",
-    tableId: 935218,
-    fields: {
-      generationStatus: "field_8123271",
-      shopify: "field_8123274",
-      comment: "field_8123272",
-    },
-  },
-  {
-    name: "Bandhani Silk Saree",
-    tableId: 935212,
-    fields: {
-      generationStatus: "field_8123169",
-      shopify: "field_8123172",
-      comment: "field_8123170",
-    },
-  },
-  {
-    name: "Men Accessories",
-    displayName: "Men Tie",
-    group: "Accessories",
-    subcategory: "Men Tie",
-    mediaProfile: "menAccessory",
-    tableId: 936098,
-    fields: {
-      generationStatus: "field_8133054",
-      shopify: "field_8133057",
-      comment: "field_8133056",
-    },
-  },
-  {
-    name: "Dupattas",
-    displayName: "Dupattas",
-    group: "Accessories",
-    subcategory: "Dupattas",
-    mediaProfile: "dupatta",
-    tableId: 936099,
-    fields: {
-      generationStatus: "field_8133069",
-      shopify: "field_8133072",
-      comment: "field_8133070",
-    },
-  },
-  {
-    name: "Designer Blouses",
-    displayName: "Designer Blouses",
-    group: "Accessories",
-    subcategory: "Designer Blouses",
-    mediaProfile: "designerBlouse",
-    tableId: 936100,
-    fields: {
-      generationStatus: "field_8133084",
-      shopify: "field_8133087",
-      comment: "field_8133086",
-    },
-  },
-  {
-    name: "Shawls",
-    displayName: "Shawls",
-    group: "Accessories",
-    subcategory: "Shawls",
-    mediaProfile: "shawl",
-    tableId: 936101,
-    fields: {
-      generationStatus: "field_8133109",
-      shopify: "field_8133115",
-      comment: "field_8133113",
-    },
-  },
-  {
-    name: "Silk Scarves",
-    displayName: "Silk Scarves",
-    group: "Accessories",
-    subcategory: "Silk Scarves",
-    mediaProfile: "silkScarf",
-    tableId: 936102,
-    fields: {
-      generationStatus: "field_8133130",
-      shopify: "field_8133133",
-      comment: "field_8133132",
-    },
-  },
-  {
-    name: "Silk Stoles",
-    displayName: "Silk Stoles",
-    group: "Accessories",
-    subcategory: "Silk Stoles",
-    mediaProfile: "silkStole",
-    tableId: 936103,
-    fields: {
-      generationStatus: "field_8133145",
-      shopify: "field_8133148",
-      comment: "field_8133147",
-    },
-  },
-  {
-    name: "Fabrics",
-    displayName: "Silk Fabric",
-    group: "Fabric",
-    subcategory: "Silk Fabric",
-    mediaProfile: "fabric",
-    tableId: 948124,
-    fields: {
-      generationStatus: "field_8253764",
-      shopify: "field_8253767",
-      comment: "field_8253765",
-    },
-  },
-];
 
 SAREE_TABLES.forEach((table) => {
   if (!table.displayName) table.displayName = table.name;
@@ -708,6 +429,10 @@ SAREE_TABLES.forEach((table) => {
   table.generationStatusFieldId = numericFieldId(table.fields.generationStatus);
   table.shopifyNotesFieldId = numericFieldId(table.fields.shopify);
   table.commentFieldId = numericFieldId(table.fields.comment);
+  table.fields.quality_score = null;
+  table.qualityScoreFieldId = null;
+  table.qualityScoreFieldType = null;
+  table.notInStockAvailable = false;
 });
 
 app.use(cors());
@@ -1104,9 +829,16 @@ function readField(row, fieldId, fallbackName, fieldMap = null) {
 
 function normalizeFieldName(name) {
   return String(name || "")
+    .trim()
     .toLowerCase()
-    .replace(/[\s_+\-]+/g, "")
-    .trim();
+    .replace(/[\s_+\-]+/g, "");
+}
+
+function findFieldByName(fields, name) {
+  const wanted = normalizeFieldName(name);
+  return (Array.isArray(fields) ? fields : []).find(
+    (field) => normalizeFieldName(field?.name) === wanted
+  ) || null;
 }
 
 function getByAliases(row, aliases, fieldMap = null) {
@@ -1225,6 +957,7 @@ async function fetchFieldMap(tableId) {
       byName: new Map(cachedFields.map((field) => [field.name, `field_${field.id}`])),
       fields: cachedFields,
     };
+    resolveReviewTableFields(getTableConfig(tableId), fieldMap);
     fieldMapCache.set(String(tableId), fieldMap);
     return fieldMap;
   }
@@ -1246,6 +979,7 @@ async function fetchFieldMap(tableId) {
     byName: new Map(fields.map((field) => [field.name, `field_${field.id}`])),
     fields,
   };
+  resolveReviewTableFields(getTableConfig(tableId), fieldMap);
   fieldMapCache.set(String(tableId), fieldMap);
   await cacheSet(fieldsCacheKey, fields, CACHE_FIELDS_TTL);
   return fieldMap;
@@ -1273,6 +1007,37 @@ function findFieldByAliases(fieldMap, aliases) {
     normalizedAliases.has(normalizeFieldName(`field_${item.id}`))
   );
   return field ? { id: field.id, name: field.name, type: field.type } : null;
+}
+
+function resolveReviewTableFields(tableConfig, fieldMap) {
+  if (!tableConfig || !fieldMap) {
+    return {
+      generationStatusField: null,
+      qualityScoreField: null,
+      notInStockAvailable: false,
+    };
+  }
+
+  const generationStatusField = findFieldByName(fieldMap.fields, "Generation Status");
+  const qualityScoreField = findFieldByName(fieldMap.fields, "Quality Score");
+
+  if (generationStatusField) {
+    tableConfig.fields.generationStatus = `field_${generationStatusField.id}`;
+    tableConfig.generationStatusFieldId = Number(generationStatusField.id);
+  }
+
+  tableConfig.fields.quality_score = qualityScoreField ? `field_${qualityScoreField.id}` : null;
+  tableConfig.qualityScoreFieldId = qualityScoreField ? Number(qualityScoreField.id) : null;
+  tableConfig.qualityScoreFieldType = qualityScoreField?.type || null;
+  tableConfig.notInStockAvailable = Boolean(
+    generationStatusField && getSelectOptionValues(generationStatusField).includes(GENERATION_STATUS_NOT_IN_STOCK_VALUE)
+  );
+
+  return {
+    generationStatusField,
+    qualityScoreField,
+    notInStockAvailable: tableConfig.notInStockAvailable,
+  };
 }
 
 function mediaAliases(mediaDef) {
@@ -1355,7 +1120,9 @@ function mediaFieldDetection(rows, tableConfig, fieldMap, type) {
 
 function validateTableFields(tableConfig, fieldMap) {
   const warnings = [];
-  const generationField = findConfiguredField(fieldMap, tableConfig.fields.generationStatus);
+  const resolvedReviewFields = resolveReviewTableFields(tableConfig, fieldMap);
+  const generationField = resolvedReviewFields.generationStatusField;
+  const qualityScoreField = resolvedReviewFields.qualityScoreField;
   const shopifyField = findConfiguredField(fieldMap, tableConfig.fields.shopify);
   const commentField = tableConfig.fields.comment
     ? findConfiguredField(fieldMap, tableConfig.fields.comment)
@@ -1371,6 +1138,13 @@ function validateTableFields(tableConfig, fieldMap) {
     if (!generationOptions.includes(GENERATION_STATUS_FAILED_VALUE)) {
       warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option Failed.`);
     }
+    if (!generationOptions.includes(GENERATION_STATUS_NOT_IN_STOCK_VALUE)) {
+      warnings.push(`Generation Status field ${tableConfig.fields.generationStatus} does not include option ${GENERATION_STATUS_NOT_IN_STOCK_VALUE}.`);
+    }
+  }
+
+  if (!qualityScoreField) {
+    warnings.push('Quality Score field was not found. Quantity updates are disabled for this collection.');
   }
 
   if (!shopifyField) {
@@ -1404,6 +1178,7 @@ function validateTableFields(tableConfig, fieldMap) {
     warnings,
     fields: {
       generationStatus: generationField ? { id: generationField.id, name: generationField.name, type: generationField.type, options: getSelectOptionValues(generationField) } : null,
+      qualityScore: qualityScoreField ? { id: qualityScoreField.id, name: qualityScoreField.name, type: qualityScoreField.type } : null,
       shopifyNotes: shopifyField ? { id: shopifyField.id, name: shopifyField.name, type: shopifyField.type, acceptsFreeText: !/select/.test(String(shopifyField.type || "")), options: getSelectOptionValues(shopifyField) } : null,
       comment: commentField ? { id: commentField.id, name: commentField.name, type: commentField.type } : null,
     },
@@ -1529,6 +1304,13 @@ function isApprovedGeneration(row, tableConfig, fieldMap = null) {
   return value === "approved" || status?.id === 5987929;
 }
 
+function normalizeReviewQuantity(value) {
+  if (value === null || value === undefined || value === "") return 1;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 1) return 1;
+  return Math.min(99999, Math.floor(numeric));
+}
+
 function shouldShowReviewProduct(product) {
   const generationStatus = normalizeReviewStatus(
     product.generationStatus ??
@@ -1551,7 +1333,9 @@ function isVisibleReviewRow(row, tableConfig, fieldMap = null) {
 }
 
 function validateReviewTableConfig(tableConfig, fieldMap = null) {
-  const generationField = fieldMap ? findConfiguredField(fieldMap, tableConfig.fields.generationStatus) : tableConfig.fields.generationStatus;
+  const generationField = fieldMap
+    ? resolveReviewTableFields(tableConfig, fieldMap).generationStatusField
+    : tableConfig.fields.generationStatus;
   const shopifyField = fieldMap ? findConfiguredField(fieldMap, tableConfig.fields.shopify) : tableConfig.fields.shopify;
   const valid = Boolean(tableConfig.tableId && generationField && shopifyField);
   if (!valid) {
@@ -1566,9 +1350,11 @@ function validateReviewTableConfig(tableConfig, fieldMap = null) {
 }
 
 function normalizeProduct(row, tableConfig, fieldMap = null) {
+  const resolvedReviewFields = resolveReviewTableFields(tableConfig, fieldMap);
   const generationStatus = readField(row, tableConfig.fields.generationStatus, "Generation Status", fieldMap);
   const shopify = readField(row, tableConfig.fields.shopify, "SHOPIFY", fieldMap);
   const comment = readField(row, tableConfig.fields.comment, "Comment", fieldMap);
+  const rawQualityScore = readField(row, tableConfig.fields.quality_score, "Quality Score", fieldMap);
   const namedRow = rowWithFieldNames(row, fieldMap?.fields || []);
   const generatedMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "generated");
   const referenceMedia = buildMediaItems(namedRow, fieldMap, tableConfig, "reference");
@@ -1606,6 +1392,10 @@ function normalizeProduct(row, tableConfig, fieldMap = null) {
     shopify: getSelectValue(shopify) || "Pending",
     shopifyNotes: getSelectValue(shopify) || "",
     shopifyStatus: getSelectValue(shopify) || "",
+    quantity: normalizeReviewQuantity(rawQualityScore),
+    qualityScoreFieldId: tableConfig.qualityScoreFieldId,
+    quantityAvailable: Boolean(resolvedReviewFields.qualityScoreField),
+    notInStockAvailable: Boolean(resolvedReviewFields.generationStatusField && resolvedReviewFields.notInStockAvailable),
     comment: comment || "",
     modified: readField(row, null, "Last Modified", fieldMap) || row.updated_on || row.created_on || "",
     specifications: readField(row, null, "Specifications", fieldMap) || "",
@@ -2485,6 +2275,26 @@ function buildRejectPayload(tableConfig, commentText) {
   return payload;
 }
 
+function parsePositiveRowId(value) {
+  const rowId = Number(value);
+  return Number.isInteger(rowId) && rowId > 0 ? rowId : null;
+}
+
+function buildNotInStockPayload(tableConfig) {
+  return {
+    [tableConfig.fields.generationStatus]: GENERATION_STATUS_NOT_IN_STOCK_VALUE,
+  };
+}
+
+function buildQuantityPayload(tableConfig, quantity) {
+  const value = /text/i.test(String(tableConfig.qualityScoreFieldType || ""))
+    ? String(quantity)
+    : quantity;
+  return {
+    [tableConfig.fields.quality_score]: value,
+  };
+}
+
 function updatePermissionResponse(res, error) {
   return res.status(error.status || 403).json({
     success: false,
@@ -2819,6 +2629,104 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
+app.patch("/api/products/:tableId/:rowId/not-in-stock", async (req, res) => {
+  const tableConfig = getTableConfig(req.params.tableId);
+  const rowId = parsePositiveRowId(req.params.rowId);
+  if (!tableConfig) {
+    return res.status(400).json({ ok: false, success: false, error: "Unknown Saree Review table." });
+  }
+  if (!rowId) {
+    return res.status(400).json({ ok: false, success: false, error: "Invalid product row." });
+  }
+
+  try {
+    const fieldMap = await fetchFieldMap(tableConfig.tableId);
+    const resolved = resolveReviewTableFields(tableConfig, fieldMap);
+    if (!resolved.generationStatusField) {
+      return res.status(409).json({
+        ok: false,
+        success: false,
+        error: "NOT IN STOCK is unavailable because Generation Status could not be resolved for this collection.",
+      });
+    }
+    if (!resolved.notInStockAvailable) {
+      return res.status(409).json({
+        ok: false,
+        success: false,
+        error: "NOT IN STOCK is not configured in this collection's Generation Status options.",
+      });
+    }
+
+    await patchBaserowRow(tableConfig.tableId, rowId, buildNotInStockPayload(tableConfig));
+    await invalidateProductCache(tableConfig.tableId);
+    return res.json({
+      ok: true,
+      success: true,
+      tableId: tableConfig.tableId,
+      rowId,
+      generationStatus: GENERATION_STATUS_NOT_IN_STOCK_VALUE,
+      hiddenFromDashboard: true,
+    });
+  } catch (error) {
+    console.warn("Saree NOT IN STOCK update failed", {
+      tableId: tableConfig.tableId,
+      rowId,
+      status: Number(error.status || 500),
+    });
+    return res.status(error.status === 401 || error.status === 403 ? error.status : 502).json({
+      ok: false,
+      success: false,
+      error: "Unable to mark this product as NOT IN STOCK. No changes were saved.",
+    });
+  }
+});
+
+app.patch("/api/products/:tableId/:rowId/quantity", async (req, res) => {
+  const tableConfig = getTableConfig(req.params.tableId);
+  const rowId = parsePositiveRowId(req.params.rowId);
+  const quantity = Number(req.body?.quantity);
+  if (!tableConfig) {
+    return res.status(400).json({ ok: false, success: false, error: "Unknown Saree Review table." });
+  }
+  if (!rowId) {
+    return res.status(400).json({ ok: false, success: false, error: "Invalid product row." });
+  }
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99999) {
+    return res.status(400).json({
+      ok: false,
+      success: false,
+      error: "Enter a whole quantity between 1 and 99,999.",
+    });
+  }
+
+  try {
+    const fieldMap = await fetchFieldMap(tableConfig.tableId);
+    const resolved = resolveReviewTableFields(tableConfig, fieldMap);
+    if (!resolved.qualityScoreField) {
+      return res.status(409).json({
+        ok: false,
+        success: false,
+        error: "Quantity is unavailable for this collection because the Quality Score field could not be resolved.",
+      });
+    }
+
+    await patchBaserowRow(tableConfig.tableId, rowId, buildQuantityPayload(tableConfig, quantity));
+    await invalidateProductCache(tableConfig.tableId);
+    return res.json({ ok: true, success: true, tableId: tableConfig.tableId, rowId, quantity });
+  } catch (error) {
+    console.warn("Saree quantity update failed", {
+      tableId: tableConfig.tableId,
+      rowId,
+      status: Number(error.status || 500),
+    });
+    return res.status(error.status === 401 || error.status === 403 ? error.status : 502).json({
+      ok: false,
+      success: false,
+      error: "Quantity could not be updated. The previous value has been kept.",
+    });
+  }
+});
+
 app.patch("/api/products/:tableId/:rowId/approve", async (req, res) => {
   try {
     const { tableId, rowId } = req.params;
@@ -3078,6 +2986,16 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           shopifyField: tableConfig.fields.shopify,
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
+          generationStatus: {
+            resolved: Boolean(validation.fields.generationStatus),
+            fieldId: validation.fields.generationStatus?.id || null,
+            notInStockOption: Boolean(validation.fields.generationStatus?.options?.includes(GENERATION_STATUS_NOT_IN_STOCK_VALUE)),
+          },
+          qualityScore: {
+            resolved: Boolean(validation.fields.qualityScore),
+            fieldId: validation.fields.qualityScore?.id || null,
+            type: validation.fields.qualityScore?.type || null,
+          },
           liveFields: validation.fields,
           referenceFieldsDetected,
           generatedFieldsDetected,
@@ -3103,6 +3021,8 @@ app.get("/api/baserow/diagnose", async (req, res) => {
           shopifyField: tableConfig.fields.shopify,
           commentField: tableConfig.fields.comment,
           generationStatusField: tableConfig.fields.generationStatus,
+          generationStatus: { resolved: false, fieldId: null, notInStockOption: false },
+          qualityScore: { resolved: false, fieldId: null, type: null },
           liveFields: null,
           referenceFieldsDetected: [],
           generatedFieldsDetected: [],
@@ -3125,6 +3045,9 @@ app.get("/api/baserow/diagnose", async (req, res) => {
     const accessibleTables = tables.filter((table) => table.readAccess).length;
     const failedTables = tables.length - accessibleTables;
     const warningCount = tables.reduce((sum, table) => sum + table.warnings.length, 0);
+    const generationStatusResolved = tables.filter((table) => table.generationStatus?.resolved).length;
+    const qualityScoreResolved = tables.filter((table) => table.qualityScore?.resolved).length;
+    const notInStockConfigured = tables.filter((table) => table.generationStatus?.notInStockOption).length;
 
     const payload = {
       success: failedTables === 0,
@@ -3135,6 +3058,11 @@ app.get("/api/baserow/diagnose", async (req, res) => {
         accessibleTables,
         failedTables,
         warningCount,
+        generationStatusResolved,
+        qualityScoreResolved,
+        notInStockConfigured,
+        quantityUnavailableCollections: tables.filter((table) => !table.qualityScore?.resolved).map((table) => table.collection),
+        notInStockUnavailableCollections: tables.filter((table) => !table.generationStatus?.notInStockOption).map((table) => table.collection),
         totalApprovedRows: tables.reduce((sum, table) => sum + table.approvedRows, 0),
       },
     };

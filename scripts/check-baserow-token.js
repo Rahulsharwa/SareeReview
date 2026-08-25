@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { SAREE_TABLES } from "../saree-review-config.js";
 
 dotenv.config();
 
@@ -6,35 +7,6 @@ const BASEROW_BASE_URL = process.env.BASEROW_BASE_URL || process.env.BASEROW_API
 const SAREE_BASEROW_DATABASE_ID = process.env.SAREE_BASEROW_DATABASE_ID || process.env.BASEROW_DATABASE_ID || "419522";
 const SAREE_BASEROW_TOKEN = process.env.SAREE_BASEROW_TOKEN || process.env.BASEROW_TOKEN;
 
-const SAREE_TABLES = [
-  { name: "Kanjivaram Silks", tableId: 948083, fields: { generationStatus: "field_8253052", shopify: "field_8253055", comment: "field_8253053" } },
-  { name: "Pure Silk Sarees", tableId: 935204, fields: { generationStatus: "field_8123033", shopify: "field_8123036", comment: "field_8123034" } },
-  { name: "Tussar Silk Saree", tableId: 948245, fields: { generationStatus: "field_8254631", shopify: "field_8254634", comment: "field_8254632" } },
-  { name: "South Weaves - South Silk Sarees", tableId: 935205, fields: { generationStatus: "field_8123050", shopify: "field_8123053", comment: "field_8123051" } },
-  { name: "Soft Silk Sarees", tableId: 935207, fields: { generationStatus: "field_8123084", shopify: "field_8123087", comment: "field_8123085" } },
-  { name: "Patola & Orissa Silk Sarees", tableId: 935208, fields: { generationStatus: "field_8123101", shopify: "field_8123104", comment: "field_8123102" } },
-  { name: "Printed Pure Silk Sarees", tableId: 935203, fields: { generationStatus: "field_8123016", shopify: "field_8123019", comment: "field_8123017" } },
-  { name: "Cotton Silk Sarees", tableId: 935215, fields: { generationStatus: "field_8123220", shopify: "field_8123223", comment: "field_8123221" } },
-  { name: "Paithani Silk Sarees", tableId: 935206, fields: { generationStatus: "field_8123067", shopify: "field_8123070", comment: "field_8123068" } },
-  { name: "Banarasi Georgette Silk Sarees", tableId: 935209, fields: { generationStatus: "field_8123118", shopify: "field_8123121", comment: "field_8123119" } },
-  { name: "Banarasi Silk Sarees", tableId: 935210, fields: { generationStatus: "field_8123135", shopify: "field_8123138", comment: "field_8123136" } },
-  { name: "Banarasi Kora Silk Saree", tableId: 935211, fields: { generationStatus: "field_8123152", shopify: "field_8123155", comment: "field_8123153" } },
-  { name: "Gadwal Handloom", tableId: 935213, fields: { generationStatus: "field_8123186", shopify: "field_8123189", comment: "field_8123187" } },
-  { name: "Jamawar Silk Sarees", tableId: 935214, fields: { generationStatus: "field_8123203", shopify: "field_8123206", comment: null } },
-  { name: "Cotton Saree", tableId: 935216, fields: { generationStatus: "field_8123237", shopify: "field_8123240", comment: "field_8123238" } },
-  { name: "Cotton Suits", tableId: 936059, fields: { generationStatus: "field_8132747", shopify: "field_8132750", comment: "field_8132748" } },
-  { name: "Silk Suits", tableId: 936060, fields: { generationStatus: "field_8132764", shopify: "field_8132767", comment: "field_8132765" } },
-  { name: "Linen & Kota Silk Sarees", tableId: 935217, fields: { generationStatus: "field_8123254", shopify: "field_8123257", comment: "field_8123255" } },
-  { name: "Art Silk Sarees", tableId: 935218, fields: { generationStatus: "field_8123271", shopify: "field_8123274", comment: "field_8123272" } },
-  { name: "Bandhani Silk Saree", tableId: 935212, fields: { generationStatus: "field_8123169", shopify: "field_8123172", comment: "field_8123170" } },
-  { name: "Men Accessories / Men Tie", tableId: 936098, fields: { generationStatus: "field_8133054", shopify: "field_8133057", comment: "field_8133056" } },
-  { name: "Dupattas", tableId: 936099, fields: { generationStatus: "field_8133069", shopify: "field_8133072", comment: "field_8133070" } },
-  { name: "Designer Blouses", tableId: 936100, fields: { generationStatus: "field_8133084", shopify: "field_8133087", comment: "field_8133086" } },
-  { name: "Shawls", tableId: 936101, fields: { generationStatus: "field_8133109", shopify: "field_8133115", comment: "field_8133113" } },
-  { name: "Silk Scarves", tableId: 936102, fields: { generationStatus: "field_8133130", shopify: "field_8133133", comment: "field_8133132" } },
-  { name: "Silk Stoles", tableId: 936103, fields: { generationStatus: "field_8133145", shopify: "field_8133148", comment: "field_8133147" } },
-  { name: "Fabrics / Silk Fabric", tableId: 948124, fields: { generationStatus: "field_8253764", shopify: "field_8253767", comment: "field_8253765" } },
-];
 
 function getSelectValue(value) {
   if (!value) return "";
@@ -47,6 +19,36 @@ function getSelectValue(value) {
 function isApprovedGeneration(row, tableConfig) {
   const status = row[tableConfig.fields.generationStatus];
   return getSelectValue(status) === "Approved" || status?.id === 5987929;
+}
+
+function normalizeFieldName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+function findFieldByName(fields, name) {
+  const wanted = normalizeFieldName(name);
+  return (Array.isArray(fields) ? fields : []).find(
+    (field) => normalizeFieldName(field?.name) === wanted
+  ) || null;
+}
+
+async function fetchFields(tableConfig) {
+  const response = await fetch(`${BASEROW_BASE_URL}/api/database/fields/table/${tableConfig.tableId}/`, {
+    headers: {
+      Authorization: `Token ${SAREE_BASEROW_TOKEN}`,
+      Accept: "application/json",
+    },
+  });
+  const data = await response.json().catch(() => null);
+  return {
+    ok: response.ok,
+    status: response.status,
+    error: data?.error || null,
+    fields: Array.isArray(data) ? data : [],
+  };
 }
 
 async function fetchRows(tableConfig) {
@@ -88,17 +90,32 @@ if (!SAREE_BASEROW_TOKEN) {
   let accessible = 0;
   let failed = 0;
   let totalApproved = 0;
+  let generationStatusResolved = 0;
+  let qualityScoreResolved = 0;
+  let notInStockConfigured = 0;
+  const missingQualityScore = [];
+  const missingNotInStock = [];
 
   for (const table of SAREE_TABLES) {
-    const result = await fetchRows(table);
-    if (result.ok) {
+    const [result, fieldResult] = await Promise.all([fetchRows(table), fetchFields(table)]);
+    if (result.ok && fieldResult.ok) {
       const approved = result.rows.filter((row) => isApprovedGeneration(row, table)).length;
+      const generationStatus = findFieldByName(fieldResult.fields, "Generation Status");
+      const qualityScore = findFieldByName(fieldResult.fields, "Quality Score");
+      const generationOptions = (generationStatus?.select_options || []).map((option) => String(option.value || option.name || ""));
+      const hasNotInStock = generationOptions.includes("NOT IN STOCK");
       accessible += 1;
       totalApproved += approved;
-      console.log(`[OK] ${table.name} (${table.tableId}): approved ${approved}, status=${table.fields.generationStatus}, shopify=${table.fields.shopify}, comment=${table.fields.comment || "none"}`);
+      if (generationStatus) generationStatusResolved += 1;
+      if (qualityScore) qualityScoreResolved += 1;
+      if (hasNotInStock) notInStockConfigured += 1;
+      if (!qualityScore) missingQualityScore.push(table.displayName || table.name);
+      if (!hasNotInStock) missingNotInStock.push(table.displayName || table.name);
+      console.log(`[OK] ${table.displayName || table.name} (${table.tableId}): approved=${approved}, Generation Status=${generationStatus ? `field_${generationStatus.id}` : "missing"}, Quality Score=${qualityScore ? `field_${qualityScore.id} (${qualityScore.type})` : "missing"}, NOT IN STOCK=${hasNotInStock ? "configured" : "missing"}`);
     } else {
       failed += 1;
-      console.log(`[FAIL] ${table.name} (${table.tableId}): HTTP ${result.status} ${result.error || ""}`);
+      const failedResult = result.ok ? fieldResult : result;
+      console.log(`[FAIL] ${table.displayName || table.name} (${table.tableId}): HTTP ${failedResult.status} ${failedResult.error || ""}`);
     }
   }
 
@@ -106,6 +123,11 @@ if (!SAREE_BASEROW_TOKEN) {
   console.log(`Accessible tables: ${accessible}/${SAREE_TABLES.length}`);
   console.log(`Failed tables: ${failed}`);
   console.log(`Approved rows: ${totalApproved}`);
+  console.log(`Generation Status resolved: ${generationStatusResolved}/${SAREE_TABLES.length}`);
+  console.log(`Quality Score resolved: ${qualityScoreResolved}/${SAREE_TABLES.length}`);
+  console.log(`NOT IN STOCK configured: ${notInStockConfigured}/${SAREE_TABLES.length}`);
+  console.log(`Quantity unavailable: ${missingQualityScore.length ? missingQualityScore.join(", ") : "none"}`);
+  console.log(`NOT IN STOCK unavailable: ${missingNotInStock.length ? missingNotInStock.join(", ") : "none"}`);
 
   if (failed > 0) {
     console.log("");

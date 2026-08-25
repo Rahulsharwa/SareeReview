@@ -785,7 +785,7 @@
 
     .action-bar {
       display: grid;
-      grid-template-columns: minmax(210px, 1fr) 140px 170px 120px 140px;
+      grid-template-columns: minmax(240px, 1fr) minmax(520px, 1.6fr);
       gap: 14px;
       align-items: center;
       padding: 18px;
@@ -794,9 +794,7 @@
       border: 1px solid var(--border);
       border-radius: 22px;
       box-shadow: var(--shadow);
-      position: sticky;
-      bottom: 18px;
-      z-index: 12;
+      position: static;
       backdrop-filter: blur(14px);
     }
 
@@ -828,6 +826,26 @@
     .btn-neutral { background: #f4f2ee; color: var(--text); border-color: #cfc4b5; }
     .btn-green { background: var(--green); color: white; }
     .btn-maroon { background: var(--maroon); color: white; }
+    .btn-not-in-stock { background: #fff7ed; color: #9a3412; border-color: #b45309; }
+    .btn:disabled { cursor: not-allowed; opacity: .52; transform: none; box-shadow: none; }
+
+    .review-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .quantity-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .quantity-value {
+      min-width: 34px;
+      text-align: center;
+      font-weight: 950;
+    }
 
     .grid-view {
       display: none;
@@ -1065,7 +1083,7 @@
       font-size: 13px;
     }
 
-    .modal select, .modal textarea {
+    .modal select, .modal textarea, .modal input {
       width: 100%;
       border: 1px solid var(--border);
       border-radius: 13px;
@@ -1073,6 +1091,11 @@
       padding: 13px;
       outline: none;
     }
+
+    .review-confirm-copy { margin: 0 0 20px; color: var(--text); line-height: 1.55; }
+    .review-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+    .review-quantity-input { height: 52px; font-size: 18px; font-weight: 850; }
+    .review-field-warning { color: #9a3412; font-size: 13px; font-weight: 750; }
 
     .modal textarea { min-height: 170px; resize: vertical; }
     .char-count { text-align: right; color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -1211,8 +1234,8 @@
       }
       .mini-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
       .mini-tab { white-space: nowrap; }
-      .action-bar { grid-template-columns: 1fr 1fr; }
-      .note-input { grid-column: 1 / -1; }
+      .action-bar { grid-template-columns: 1fr; }
+      .review-actions-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .product-card { grid-template-columns: 1fr; }
       .card-img { height: 320px; }
       .compare-controls { grid-template-columns: 1fr; }
@@ -1220,6 +1243,12 @@
       .mobile-preview { grid-template-columns: 1fr; }
       .toast-stack { left: 14px; right: 14px; }
       .toast { min-width: 0; }
+    }
+
+    @media (max-width: 520px) {
+      .review-actions-grid { grid-template-columns: 1fr; }
+      .review-modal-actions { flex-direction: column-reverse; }
+      .review-modal-actions .btn { width: 100%; }
     }
   </style>
 </head>
@@ -1278,7 +1307,7 @@
         <div class="detail-nav">
           <div class="detail-nav-title">Detailed Product Review</div>
           <div class="detail-nav-actions">
-            <button class="btn btn-neutral" type="button" onclick="backToMainMenu()">← Back to Main Menu</button>
+            <button class="btn btn-neutral" type="button" onclick="closeSareeDetail()">← Back to Review List</button>
             <button class="btn btn-maroon" type="button" onclick="jumpToNextProduct()">Next Product →</button>
           </div>
         </div>
@@ -1322,10 +1351,14 @@
 
         <div class="action-bar">
           <input id="approvalNote" class="note-input" placeholder="Add approval note..." />
-          <button class="btn btn-red" type="button" onclick="rejectProduct()">Reject</button>
-          <button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button>
-          <button class="btn btn-neutral" type="button" onclick="jumpToNextProduct()">Skip / Next</button>
-          <button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button>
+          <div class="review-actions-grid">
+            <button class="btn btn-red" type="button" onclick="rejectProduct()">Reject</button>
+            <button class="btn btn-gold" type="button" onclick="openRequestModal()">Request Changes</button>
+            <button class="btn btn-not-in-stock" id="notInStockActionButton" type="button" onclick="openNotInStockModal()">NOT IN STOCK</button>
+            <button class="btn btn-neutral" id="quantityActionButton" type="button" onclick="openQuantityModal()">Quantity</button>
+            <button class="btn btn-neutral" type="button" onclick="jumpToNextProduct()">Skip / Next</button>
+            <button class="btn btn-green" type="button" onclick="approveProduct()">Approve</button>
+          </div>
         </div>
       </section>
 
@@ -1665,6 +1698,37 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="notInStockModal" role="dialog" aria-modal="true" aria-labelledby="notInStockTitle">
+    <div class="modal" style="width:min(520px, 96vw);">
+      <div class="modal-head">
+        <h3 id="notInStockTitle">Mark NOT IN STOCK</h3>
+        <button class="icon-btn" type="button" onclick="closeNotInStockModal()" aria-label="Close">×</button>
+      </div>
+      <p class="review-confirm-copy">Product: <strong id="notInStockProductLabel">--</strong></p>
+      <p class="review-confirm-copy">Mark this product as NOT IN STOCK?</p>
+      <div class="review-modal-actions">
+        <button class="btn btn-neutral" type="button" onclick="closeNotInStockModal()">Cancel</button>
+        <button class="btn btn-not-in-stock" id="confirmNotInStockButton" type="button" onclick="confirmNotInStock()">Confirm NOT IN STOCK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="quantityModal" role="dialog" aria-modal="true" aria-labelledby="quantityModalTitle">
+    <div class="modal" style="width:min(480px, 96vw);">
+      <div class="modal-head">
+        <h3 id="quantityModalTitle">Update Quantity</h3>
+        <button class="icon-btn" type="button" onclick="closeQuantityModal()" aria-label="Close">×</button>
+      </div>
+      <label for="reviewQuantityInput">Quantity</label>
+      <input id="reviewQuantityInput" class="review-quantity-input" type="number" min="1" max="99999" step="1" inputmode="numeric" />
+      <p class="review-field-warning" id="quantityModalError" hidden></p>
+      <div class="review-modal-actions" style="margin-top:20px;">
+        <button class="btn btn-neutral" type="button" onclick="closeQuantityModal()">Cancel</button>
+        <button class="btn btn-maroon" id="saveQuantityButton" type="button" onclick="saveReviewQuantity()">Save Quantity</button>
+      </div>
+    </div>
+  </div>
+
   <div class="lightbox-backdrop" id="lightbox">
     <div class="lightbox">
       <div class="lightbox-head">
@@ -1902,6 +1966,9 @@
         title: product.title || '',
         code: product.code || '',
         price: product.price || '',
+        quantity: product.quantity || 1,
+        quantityAvailable: Boolean(product.quantityAvailable),
+        notInStockAvailable: Boolean(product.notInStockAvailable),
         modified: product.modified || '',
         front: product.images?.front || '',
         side: product.images?.side || '',
@@ -1935,6 +2002,9 @@
         shopify: product.shopify || '',
         shopifyNotes: product.shopifyNotes || product.shopifyStatus || '',
         comment: product.comment || '',
+        quantity: product.quantity || 1,
+        quantityAvailable: Boolean(product.quantityAvailable),
+        notInStockAvailable: Boolean(product.notInStockAvailable),
         front: product.images?.front || '',
         side: product.images?.side || '',
         back: product.images?.back || '',
@@ -2000,7 +2070,8 @@
       isFetchingProducts = true;
       state.isSyncing = true;
       setSareeConnectionState('SYNCING');
-      const previousScrollY = window.scrollY;
+      const previousViewport = captureReviewViewport();
+      const previousProducts = products;
 
       try {
         const params = new URLSearchParams();
@@ -2031,7 +2102,18 @@
         });
 
         const previousSelectedProductId = state.selectedProductId;
-        const nextProducts = (Array.isArray(data.products) ? data.products : []).filter(shouldShowReviewProduct);
+        let nextProducts = (Array.isArray(data.products) ? data.products : []).filter(shouldShowReviewProduct);
+        const selectedExistsInFreshData = nextProducts.some(product => product.id === state.selectedProductId);
+        if (state.view === 'detail' && preserveDetail && state.selectedProductId && !selectedExistsInFreshData) {
+          const openProduct = previousProducts.find(product => product.id === state.selectedProductId);
+          if (openProduct) {
+            nextProducts = [...nextProducts, openProduct];
+            state.pendingGridRender = true;
+            state.deferredRemovedProductId = openProduct.id;
+          }
+        } else if (selectedExistsInFreshData) {
+          state.deferredRemovedProductId = null;
+        }
         const nextSignature = createSareeProductsSignature(nextProducts);
         const productsChanged = state.lastProductsSignature !== nextSignature;
         products = nextProducts;
@@ -2068,11 +2150,10 @@
             const nextDetailSignature = createSareeDetailSignature(updatedProduct);
             if (nextDetailSignature !== state.currentDetailSignature) {
               state.currentDetailSignature = nextDetailSignature;
-              renderAll(false);
-            } else {
-              renderGrid();
-              updateSareeSyncTime();
+              renderSareeDetailContent(updatedProduct);
             }
+            state.pendingGridRender = true;
+            updateSareeSyncTime();
           } else {
             renderAll(false);
           }
@@ -2085,10 +2166,8 @@
             ? 'The latest update is temporarily unavailable. Showing recently cached review data.'
             : `Live Baserow data refreshed. ${products.length} products loaded.`);
         }
-        if (preserveScroll) {
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' });
-          });
+        if (preserveScroll && state.view === 'grid') {
+          restoreReviewViewport(previousViewport);
         }
       } catch (error) {
         const type = error.failureType || classifyFetchFailure({ error, response: error.response });
@@ -2128,7 +2207,7 @@
       if (isRefreshingSareeCache || isFetchingProducts || state.isSyncing) return;
       isRefreshingSareeCache = true;
       setSareeConnectionState('SYNCING');
-      const previousScrollY = window.scrollY;
+      const previousViewport = captureReviewViewport();
       let cacheRefreshSucceeded = false;
       try {
         const response = await fetch('/api/cache/refresh', {
@@ -2144,7 +2223,7 @@
       try {
         await fetchCollections({ force: !cacheRefreshSucceeded, render: true });
         await fetchProductsFromAPI({ force: !cacheRefreshSucceeded, preserveDetail: true, preserveScroll: true, silent: false, showToast: true });
-        requestAnimationFrame(() => window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' }));
+        if (state.view === 'grid') restoreReviewViewport(previousViewport);
       } finally {
         isRefreshingSareeCache = false;
       }
@@ -2235,7 +2314,16 @@
       autoSyncTimer: null,
       lastProductsSignature: '',
       lastCollectionsSignature: '',
-      currentDetailSignature: ''
+      currentDetailSignature: '',
+      navigation: {
+        savedScrollY: 0,
+        sourceTableId: null,
+        sourceRowId: null,
+        previousRowKey: null,
+        nextRowKey: null
+      },
+      pendingGridRender: false,
+      deferredRemovedProductId: null
     };
 
     const GENERATED_MEDIA = [
@@ -2295,6 +2383,82 @@
     function currentProduct() {
       const visibleProducts = visibleReviewProducts();
       return visibleProducts.find(p => p.id === state.selectedProductId) || visibleProducts[0] || null;
+    }
+
+    function reviewRowKey(product) {
+      return product ? `${product.tableId}:${product.rowId}` : '';
+    }
+
+    function captureSareeReviewPosition(product, savedScrollY = null) {
+      if (!product) return;
+      const list = filteredProducts();
+      const index = list.findIndex(item => reviewRowKey(item) === reviewRowKey(product));
+      state.navigation = {
+        savedScrollY: savedScrollY === null
+          ? (window.scrollY || document.documentElement.scrollTop || 0)
+          : Number(savedScrollY || 0),
+        sourceTableId: product.tableId,
+        sourceRowId: product.rowId,
+        previousRowKey: index > 0 ? reviewRowKey(list[index - 1]) : null,
+        nextRowKey: index >= 0 && index < list.length - 1 ? reviewRowKey(list[index + 1]) : null
+      };
+    }
+
+    function captureReviewViewport() {
+      const cards = Array.from(document.querySelectorAll('[data-review-row-key]'));
+      const topCard = cards.find(card => card.getBoundingClientRect().bottom > 0) || null;
+      return {
+        scrollY: window.scrollY || document.documentElement.scrollTop || 0,
+        rowKey: topCard?.dataset.reviewRowKey || null,
+        offset: topCard ? topCard.getBoundingClientRect().top : 0
+      };
+    }
+
+    function restoreReviewViewport(viewport) {
+      requestAnimationFrame(() => {
+        const rowKey = viewport?.rowKey;
+        const target = rowKey
+          ? document.querySelector(`[data-review-row-key="${CSS.escape(rowKey)}"]`)
+          : null;
+        if (target) {
+          const nextTop = target.getBoundingClientRect().top;
+          window.scrollBy({ top: nextTop - Number(viewport.offset || 0), left: 0, behavior: 'auto' });
+          return;
+        }
+        window.scrollTo({ top: Number(viewport?.scrollY || 0), left: 0, behavior: 'auto' });
+      });
+    }
+
+    function restoreReviewListPosition(afterRemoval = false) {
+      const navigation = state.navigation || {};
+      requestAnimationFrame(() => {
+        if (afterRemoval) {
+          for (const key of [navigation.nextRowKey, navigation.previousRowKey].filter(Boolean)) {
+            const target = document.querySelector(`[data-review-row-key="${CSS.escape(key)}"]`);
+            if (target) {
+              target.scrollIntoView({ block: 'center', behavior: 'auto' });
+              return;
+            }
+          }
+        }
+        window.scrollTo({ top: Number(navigation.savedScrollY || 0), left: 0, behavior: 'auto' });
+      });
+    }
+
+    function closeSareeDetail() {
+      if (state.deferredRemovedProductId) {
+        products = products.filter(product => product.id !== state.deferredRemovedProductId);
+        state.products = products;
+        state.lastProductsSignature = createSareeProductsSignature(products);
+        const preferredKey = state.navigation?.nextRowKey || state.navigation?.previousRowKey;
+        const preferredProduct = products.find(product => reviewRowKey(product) === preferredKey);
+        state.selectedProductId = preferredProduct?.id || filteredProducts()[0]?.id || null;
+        state.deferredRemovedProductId = null;
+      }
+      state.view = 'grid';
+      state.pendingGridRender = false;
+      renderAll(false);
+      restoreReviewListPosition(false);
     }
 
     function escapeJs(value) {
@@ -2501,7 +2665,7 @@
       grid.innerHTML = list.map(p => {
         const thumbnailItems = cardMediaForProduct(p);
         return `
-          <article class="product-card">
+          <article class="product-card" data-review-row-key="${reviewRowKey(p)}">
             <div class="card-img zoom-wrap">${makeZoomable(productPreviewUrl(p), p.title)}</div>
             <div class="card-content">
               <span class="code-pill">${p.code}</span>
@@ -2511,6 +2675,7 @@
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <span class="badge">${p.generationStatus}</span>
                 <span class="badge ${p.shopify === 'Approved' ? 'green' : ''}">Shopify: ${p.shopify}</span>
+                <span class="badge">Qty: ${Number(p.quantity || 1)}</span>
               </div>
               <div class="mini-thumbs">
                 ${thumbnailItems.map(item => `<div class="mini-thumb zoom-wrap" title="${item.label}">${makeMediaThumb(item.url || p.images?.[item.key], item.shortLabel || item.label, item.type)}</div>`).join('')}
@@ -2534,6 +2699,13 @@
           <div class="meta-row"><span>Group</span><strong>${p.group || 'Catalog'}</strong></div>
           <div class="meta-row"><span>Category</span><strong>${p.subcategory || p.displayName || p.collectionName || p.category}</strong></div>
           <div class="meta-row"><span>Price (INR)</span><strong>${formatPrice(p.price)}</strong></div>
+          <div class="meta-row">
+            <span>Quantity</span>
+            <strong class="quantity-control">
+              <span class="quantity-value">${Number(p.quantity || 1)}</span>
+              <button class="btn btn-neutral" type="button" style="height:34px;padding:0 12px;" onclick="openQuantityModal()" ${p.quantityAvailable ? '' : 'disabled'} title="${p.quantityAvailable ? 'Update quantity' : 'Quality Score field is unavailable for this collection'}">Edit</button>
+            </strong>
+          </div>
         </div>
         <div class="meta-table">
           <div class="meta-row"><span>Generation Status</span><strong><span class="badge">${p.generationStatus}</span></strong></div>
@@ -2646,11 +2818,7 @@
       `;
     }
 
-    function renderAll(reset = true) {
-      renderCategories();
-      renderGrid();
-      const p = currentProduct();
-
+    function renderSareeDetailContent(p) {
       if (!p) {
         document.getElementById('productSummary').innerHTML = `<div class="panel" style="grid-column:1/-1; text-align:center; padding:42px;"><h2>No approved products found</h2><p class="card-muted">Only rows with Generation Status = Approved appear here.</p></div>`;
         document.getElementById('generatedTabs').innerHTML = '';
@@ -2670,16 +2838,37 @@
       if (state.view === 'detail') {
         state.currentDetailSignature = createSareeDetailSignature(p);
       }
+      const notInStockButton = document.getElementById('notInStockActionButton');
+      if (notInStockButton) {
+        notInStockButton.disabled = !p?.notInStockAvailable;
+        notInStockButton.title = p?.notInStockAvailable ? 'Mark product as NOT IN STOCK' : 'NOT IN STOCK is not configured for this collection';
+      }
+      const quantityButton = document.getElementById('quantityActionButton');
+      if (quantityButton) {
+        quantityButton.disabled = !p?.quantityAvailable;
+        quantityButton.title = p?.quantityAvailable ? `Update quantity (currently ${Number(p.quantity || 1)})` : 'Quality Score field is unavailable for this collection';
+      }
+      setTimeout(wireMagnifiers, 0);
+    }
+
+    function renderAll(reset = true) {
+      renderCategories();
+      renderGrid();
+      const p = currentProduct();
+      renderSareeDetailContent(p);
       updateSareeSyncTime();
       document.getElementById('gridView').classList.toggle('active', state.view === 'grid');
       document.getElementById('detailView').classList.toggle('hidden', state.view !== 'detail');
       document.getElementById('gridBtn').classList.toggle('active', state.view === 'grid');
       document.getElementById('detailBtn').classList.toggle('active', state.view === 'detail');
-      setTimeout(wireMagnifiers, 0);
     }
 
 
     function backToMainMenu() {
+      if (state.view === 'detail') {
+        closeSareeDetail();
+        return;
+      }
       state.view = 'grid';
       state.selectedCategory = 'All Collections';
       state.selectedCollectionName = 'All Collections';
@@ -2715,6 +2904,7 @@
       const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % list.length;
       const nextProduct = list[nextIndex];
 
+      captureSareeReviewPosition(nextProduct, state.navigation?.savedScrollY || 0);
       state.selectedProductId = nextProduct.id;
       state.view = 'detail';
 
@@ -2724,6 +2914,8 @@
     }
 
     function selectProduct(id, view = 'detail') {
+      const selected = filteredProducts().find(product => product.id === id);
+      if (view === 'detail' && selected) captureSareeReviewPosition(selected);
       state.selectedProductId = id;
       state.view = view;
       state.currentDetailSignature = createSareeDetailSignature(currentProduct());
@@ -2752,18 +2944,49 @@
       }
 
       const nextProduct = filteredProducts()[0];
-      state.selectedProductId = nextProduct?.id || null;
+      const preferredKey = state.navigation?.nextRowKey || state.navigation?.previousRowKey;
+      const preferredProduct = products.find(product => reviewRowKey(product) === preferredKey);
+      state.selectedProductId = preferredProduct?.id || nextProduct?.id || null;
       state.view = 'grid';
       state.currentDetailSignature = '';
+      state.pendingGridRender = false;
+    }
+
+    function capturePositionForAction(product) {
+      if (!product) return;
+      if (
+        state.view === 'grid' ||
+        Number(state.navigation?.sourceTableId) !== Number(product.tableId) ||
+        Number(state.navigation?.sourceRowId) !== Number(product.rowId)
+      ) {
+        captureSareeReviewPosition(product, state.view === 'detail' ? state.navigation?.savedScrollY : null);
+      }
+    }
+
+    function finishRemovingReviewProduct(product, message) {
+      removeProductFromSareeState(product.tableId, product.rowId);
+      renderAll(false);
+      restoreReviewListPosition(true);
+      showToast(message);
+    }
+
+    async function refreshAfterReviewMutation() {
+      await fetchCollections({ force: true, render: true });
+      await fetchProductsFromAPI({ force: true, preserveDetail: false, preserveScroll: true, silent: true });
     }
 
     async function approveProduct(id) {
-      if (id) state.selectedProductId = id;
+      if (id) {
+        const selected = filteredProducts().find(product => product.id === id);
+        if (selected) {
+          captureSareeReviewPosition(selected);
+          state.selectedProductId = id;
+        }
+      }
 
       const p = currentProduct();
       if (!p) return;
-      const approvedTableId = p.tableId;
-      const approvedRowId = p.rowId;
+      capturePositionForAction(p);
 
       try {
         const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/approve`, {
@@ -2780,11 +3003,8 @@
           throw new Error(data.error || 'Approve update failed');
         }
 
-        removeProductFromSareeState(approvedTableId, approvedRowId);
-        renderAll(false);
-        showToast('Approved successfully. Product removed from the review dashboard.');
-        await fetchCollections({ force: true, render: true });
-        await fetchProductsFromAPI({ force: true, preserveDetail: false, preserveScroll: true, silent: true });
+        finishRemovingReviewProduct(p, 'Approved successfully. Product removed from the review dashboard.');
+        await refreshAfterReviewMutation();
       } catch (error) {
         console.error(error);
         showToast('Approve failed. Check backend server logs.');
@@ -2794,6 +3014,7 @@
     async function rejectProduct() {
       const p = currentProduct();
       if (!p) return;
+      capturePositionForAction(p);
 
       try {
         const response = await fetch(`/api/products/${p.tableId}/${p.rowId}/reject`, {
@@ -2810,9 +3031,8 @@
           throw new Error(data.error || 'Reject update failed');
         }
 
-        await fetchCollections({ force: true, render: true });
-        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
-        showToast('Rejected and moved to Failed.');
+        finishRemovingReviewProduct(p, 'Rejected and moved to Failed.');
+        await refreshAfterReviewMutation();
       } catch (error) {
         console.error(error);
         showToast('Reject failed. Check backend server logs.');
@@ -2825,6 +3045,7 @@
     async function submitChanges() {
       const p = currentProduct();
       if (!p) return;
+      capturePositionForAction(p);
 
       const changeType = document.getElementById('changeType')?.value || 'Other';
       const comment = document.getElementById('changeComment')?.value || 'Changes requested from review portal';
@@ -2843,12 +3064,116 @@
         }
 
         closeRequestModal();
-        await fetchCollections({ force: true, render: true });
-        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
-        showToast('Feedback submitted and moved to Failed.');
+        finishRemovingReviewProduct(p, 'Feedback submitted and moved to Failed.');
+        await refreshAfterReviewMutation();
       } catch (error) {
         console.error(error);
         showToast('Request changes failed. Check backend server logs.');
+      }
+    }
+
+    function openNotInStockModal() {
+      const product = currentProduct();
+      if (!product) return;
+      if (!product.notInStockAvailable) {
+        showToast('NOT IN STOCK is unavailable because that status option is not configured for this collection.');
+        return;
+      }
+      document.getElementById('notInStockProductLabel').textContent = `${product.title || product.code} (${product.code})`;
+      document.getElementById('notInStockModal').classList.add('active');
+    }
+
+    function closeNotInStockModal() {
+      document.getElementById('notInStockModal').classList.remove('active');
+    }
+
+    async function confirmNotInStock() {
+      const product = currentProduct();
+      if (!product || !product.notInStockAvailable) return;
+      capturePositionForAction(product);
+      const button = document.getElementById('confirmNotInStockButton');
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/products/${product.tableId}/${product.rowId}/not-in-stock`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) throw new Error(data.error || 'NOT IN STOCK update failed');
+        closeNotInStockModal();
+        finishRemovingReviewProduct(product, 'Product marked NOT IN STOCK.');
+        await refreshAfterReviewMutation();
+      } catch (error) {
+        console.error('NOT IN STOCK update failed:', error.message);
+        showToast('Unable to mark this product as NOT IN STOCK. No changes were saved.');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function openQuantityModal() {
+      const product = currentProduct();
+      if (!product) return;
+      if (!product.quantityAvailable) {
+        showToast('Quantity is unavailable for this collection because the Quality Score field could not be resolved.');
+        return;
+      }
+      const input = document.getElementById('reviewQuantityInput');
+      const error = document.getElementById('quantityModalError');
+      input.value = String(Number(product.quantity || 1));
+      error.hidden = true;
+      error.textContent = '';
+      document.getElementById('quantityModal').classList.add('active');
+      requestAnimationFrame(() => input.select());
+    }
+
+    function closeQuantityModal() {
+      document.getElementById('quantityModal').classList.remove('active');
+    }
+
+    async function saveReviewQuantity() {
+      const product = currentProduct();
+      if (!product || !product.quantityAvailable) return;
+      const input = document.getElementById('reviewQuantityInput');
+      const error = document.getElementById('quantityModalError');
+      const quantity = Number(input.value);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99999) {
+        error.textContent = 'Enter a whole quantity between 1 and 99,999.';
+        error.hidden = false;
+        input.focus();
+        return;
+      }
+
+      const previousQuantity = Number(product.quantity || 1);
+      const previousScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      const button = document.getElementById('saveQuantityButton');
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/products/${product.tableId}/${product.rowId}/quantity`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ quantity })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) throw new Error(data.error || 'Quantity update failed');
+
+        const updated = products.find(item => Number(item.tableId) === Number(product.tableId) && Number(item.rowId) === Number(product.rowId));
+        if (updated) updated.quantity = Number(data.quantity);
+        state.products = products;
+        state.lastProductsSignature = createSareeProductsSignature(products);
+        closeQuantityModal();
+        renderSareeDetailContent(updated || product);
+        requestAnimationFrame(() => window.scrollTo({ top: previousScrollY, left: 0, behavior: 'auto' }));
+        showToast(`Quantity updated to ${Number(data.quantity)}.`);
+        await fetchProductsFromAPI({ force: true, preserveDetail: true, preserveScroll: true, silent: true });
+      } catch (saveError) {
+        product.quantity = previousQuantity;
+        console.error('Quantity update failed:', saveError.message);
+        error.textContent = 'Quantity could not be updated. The previous value has been kept.';
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
       }
     }
 
@@ -3008,6 +3333,14 @@
 
     // Keyboard shortcuts inside modal.
     window.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.getElementById('notInStockModal').classList.contains('active')) {
+        closeNotInStockModal();
+        return;
+      }
+      if (e.key === 'Escape' && document.getElementById('quantityModal').classList.contains('active')) {
+        closeQuantityModal();
+        return;
+      }
       if (!document.getElementById('lightbox').classList.contains('active')) return;
 
       if (e.key === 'Escape') closeLightbox();
@@ -3016,9 +3349,18 @@
       if (e.key === '0') resetLightbox();
     });
 
-    document.getElementById('gridBtn').addEventListener('click', () => { state.view = 'grid'; renderAll(false); });
+    document.getElementById('gridBtn').addEventListener('click', () => {
+      if (state.view === 'detail') closeSareeDetail();
+      else { state.view = 'grid'; renderAll(false); }
+    });
     document.getElementById('backMainBtn').addEventListener('click', backToMainMenu);
-    document.getElementById('detailBtn').addEventListener('click', () => { state.view = 'detail'; renderAll(false); });
+    document.getElementById('detailBtn').addEventListener('click', () => {
+      const product = currentProduct();
+      if (product) captureSareeReviewPosition(product);
+      state.view = 'detail';
+      renderAll(false);
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    });
     document.getElementById('categorySelect').addEventListener('change', e => {
       selectCategory(e.target.value);
     });
@@ -3032,6 +3374,9 @@
     document.getElementById('referenceSelect').addEventListener('change', e => { state.selectedReference = e.target.value; renderAll(false); });
     document.getElementById('generatedSelect').addEventListener('change', e => { state.selectedGenerated = e.target.value; renderAll(false); });
     document.getElementById('changeComment').addEventListener('input', e => document.getElementById('charCount').textContent = e.target.value.length);
+    document.getElementById('reviewQuantityInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter') saveReviewQuantity();
+    });
     document.getElementById('refreshBtn').addEventListener('click', syncSareeReviewNow);
 
     window.fetchProductsFromAPI = fetchProductsFromAPI;
