@@ -14,6 +14,7 @@ const uploadSareeState = {
   loaded: false,
   rows: [],
   selectedRowId: null,
+  selectedReferenceKey: "saree",
   selectedGeneratedKey: "front",
   syncTimer: null,
   maxFileSizeMb: 10,
@@ -22,6 +23,11 @@ const uploadSareeState = {
   currentRowId: null,
   loadingRecent: false,
   isSyncing: false,
+  visibleRowLimit: 20,
+  rowSignatures: new Map(),
+  visibilityRefreshTimer: null,
+  quantityRowId: null,
+  quantitySaving: false,
   submitting: false,
   lastRowsSignature: "",
   currentDetailSignature: "",
@@ -99,6 +105,16 @@ const UPLOAD_GENERATED_TABS = [
   { key: "closeUp", label: "Close-Up" },
   { key: "blouseGrid", label: "Blouse Grid" },
 ];
+const UPLOAD_REFERENCE_TABS = [
+  { key: "saree", label: "Saree Image" },
+  { key: "blouse", label: "Blouse Image" },
+  { key: "pallu", label: "Pallu Image" },
+  { key: "border", label: "Border Image" },
+];
+const UPLOAD_INITIAL_RENDER_COUNT = 20;
+const UPLOAD_RENDER_BATCH_SIZE = 20;
+const uploadImageRetryState = new WeakMap();
+let uploadImageObserver = null;
 
 function uploadEscapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -188,47 +204,99 @@ function createUploadImagePlaceholder(label) {
   return placeholder;
 }
 
-function renderUploadImage(src, label, className = "") {
+function getUploadImageObserver() {
+  if (uploadImageObserver || typeof IntersectionObserver !== "function") return uploadImageObserver;
+  uploadImageObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const image = entry.target;
+      const originalUrl = image.dataset.originalSrc || "";
+      if (!image.getAttribute("src") && originalUrl) image.src = originalUrl;
+      uploadImageObserver.unobserve(image);
+    });
+  }, { rootMargin: "600px 0px" });
+  return uploadImageObserver;
+}
+
+function observeUploadLazyImages(scope = document) {
+  const images = scope.querySelectorAll?.("img.upload-original-lazy-image[data-original-src]:not([src])") || [];
+  const observer = getUploadImageObserver();
+  images.forEach((image) => {
+    if (observer) observer.observe(image);
+    else image.src = image.dataset.originalSrc;
+  });
+}
+
+function renderUploadImage(src, label, className = "", options = {}) {
   if (!hasUploadImage(src)) {
     return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
   }
-  return `<img class="upload-media-fit ${uploadEscapeAttr(className)}" src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="lazy" decoding="async" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
+  const eager = options.priority === "high";
+  const defer = Boolean(options.defer) && !eager;
+  return `<img class="upload-media-fit upload-original-lazy-image ${uploadEscapeAttr(className)}" ${defer ? "" : `src="${uploadEscapeAttr(src)}"`} data-original-src="${uploadEscapeAttr(src)}" alt="${uploadEscapeAttr(label)}" loading="${eager ? "eager" : "lazy"}" decoding="async" fetchpriority="${eager ? "high" : "low"}" onload="handleUploadImageLoad(this)" onerror="handleUploadImageError(this, '${uploadEscapeAttr(label)}')" />`;
 }
 
-function renderUploadZoomableImage(displayUrl, originalUrl, label, className = "") {
+function renderUploadZoomableImage(displayUrl, originalUrl, label, className = "", options = {}) {
   if (!hasUploadImage(displayUrl) || !hasUploadImage(originalUrl)) {
     return `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
   }
   return `
     <button class="upload-zoomable-image" type="button" data-upload-zoom-url="${uploadEscapeAttr(originalUrl)}" data-upload-zoom-label="${uploadEscapeAttr(label)}" aria-label="Open ${uploadEscapeAttr(label)} full screen">
-      ${renderUploadImage(displayUrl, label, className)}
+      ${renderUploadImage(displayUrl, label, className, options)}
     </button>
   `;
 }
 
-function handleUploadImageError(image, label) {
-  const parent = image.parentElement;
-  image.remove();
-  if (!parent) return;
-  parent.classList.add("image-failed");
-  parent.innerHTML = `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>Image unavailable</div>`;
+function handleUploadImageLoad(image) {
+  uploadImageRetryState.delete(image);
+  image.classList.add("upload-image-loaded");
+  image.classList.remove("upload-image-load-failed");
+  const trigger = image.closest(".upload-zoomable-image");
+  if (trigger) {
+    trigger.classList.remove("image-failed");
+    delete trigger.dataset.uploadRetryImage;
+    trigger.querySelector(".upload-image-retry-label")?.remove();
+  }
 }
 
-function preloadUploadImage(url) {
-  return new Promise((resolve) => {
-    if (!hasUploadImage(url)) {
-      resolve(false);
-      return;
-    }
-    const image = new Image();
-    image.onload = () => resolve(true);
-    image.onerror = () => resolve(false);
-    image.src = url;
+function retryUploadImage(image, { reset = false } = {}) {
+  if (!image?.isConnected) return;
+  if (reset) uploadImageRetryState.set(image, 0);
+  image.classList.remove("upload-image-load-failed");
+  const trigger = image.closest(".upload-zoomable-image");
+  trigger?.classList.remove("image-failed");
+  if (trigger) {
+    delete trigger.dataset.uploadRetryImage;
+    trigger.querySelector(".upload-image-retry-label")?.remove();
+  }
+  const originalUrl = image.dataset.originalSrc || image.getAttribute("src") || "";
+  if (!originalUrl) return;
+  image.removeAttribute("src");
+  requestAnimationFrame(() => {
+    if (image.isConnected) image.src = originalUrl;
   });
 }
 
-function stableUploadRowsSignature(rows) {
-  return JSON.stringify((rows || []).filter(shouldShowUploadReviewRow).map((row) => ({
+function handleUploadImageError(image, label) {
+  const attempts = uploadImageRetryState.get(image) || 0;
+  if (attempts < 2) {
+    uploadImageRetryState.set(image, attempts + 1);
+    setTimeout(() => retryUploadImage(image), attempts === 0 ? 1500 : 5000);
+    return;
+  }
+  image.classList.add("upload-image-load-failed");
+  const trigger = image.closest(".upload-zoomable-image");
+  if (!trigger) return;
+  trigger.classList.add("image-failed");
+  trigger.dataset.uploadRetryImage = "true";
+  trigger.setAttribute("aria-label", `Retry ${label}`);
+  if (!trigger.querySelector(".upload-image-retry-label")) {
+    trigger.insertAdjacentHTML("beforeend", `<span class="upload-image-retry-label">Retry Image</span>`);
+  }
+}
+
+function createUploadRowSignature(row) {
+  return JSON.stringify({
     rowId: row.rowId,
     status: row.generationStatus || row.status || "",
     saree: row.images?.saree || "",
@@ -246,8 +314,12 @@ function stableUploadRowsSignature(rows) {
     price: row.price || "",
     descriptions: row.descriptions || "",
     commentNotes: row.commentNotes || "",
-    thumbnails: row.thumbnails || {},
-  })));
+    quantity: Number(row.quantity || 1),
+  });
+}
+
+function stableUploadRowsSignature(rows) {
+  return JSON.stringify((rows || []).filter(shouldShowUploadReviewRow).map(createUploadRowSignature));
 }
 
 function getUploadDetailSignature(row) {
@@ -265,6 +337,7 @@ function getUploadDetailSignature(row) {
     blouseGrid: row.images?.blouseGrid || "",
     descriptions: row.descriptions || "",
     commentNotes: row.commentNotes || "",
+    quantity: Number(row.quantity || 1),
   });
 }
 
@@ -708,6 +781,132 @@ function restoreUploadViewportAnchor(anchor) {
   });
 }
 
+function setUploadElementText(root, selector, value) {
+  const element = root.querySelector(selector);
+  const nextText = String(value ?? "");
+  if (element && element.textContent !== nextText) element.textContent = nextText;
+}
+
+function updateUploadMediaContainer(container, { url, label, className = "", defer = true, priority = "low" }) {
+  if (!container) return;
+  const existingImage = container.querySelector("img[data-original-src]");
+  const currentUrl = existingImage?.dataset.originalSrc || "";
+  if (hasUploadImage(url) && currentUrl === url) return;
+  if (!hasUploadImage(url) && !existingImage && container.querySelector(".upload-empty-media")) return;
+
+  if (existingImage && uploadImageObserver) uploadImageObserver.unobserve(existingImage);
+  container.innerHTML = hasUploadImage(url)
+    ? renderUploadZoomableImage(url, url, label, className, { defer, priority })
+    : `<div class="upload-empty-media">${uploadEscapeHtml(label)}<br>-</div>`;
+  observeUploadLazyImages(container);
+}
+
+function uploadCardMediaItems(row, mainImage) {
+  return [
+    { key: "saree", label: "Saree" },
+    { key: "blouse", label: "Blouse" },
+    { key: "pallu", label: "Pallu" },
+    { key: "border", label: "Border" },
+    { key: "front", label: "Front View" },
+    { key: "side", label: "Side View" },
+    { key: "back", label: "Back View" },
+    { key: "closeUp", label: "Close-Up" },
+    { key: "blouseGrid", label: "Blouse Grid" },
+  ].filter((item) => item.key !== mainImage.key && hasUploadImage(row.images?.[item.key]));
+}
+
+function createUploadCardElement(row) {
+  const card = document.createElement("article");
+  card.className = "upload-card upload-recent-card";
+  card.dataset.uploadRowId = String(row.rowId);
+  card.innerHTML = `
+    <div class="upload-card-media upload-main-image upload-recent-main-media" data-upload-card-main></div>
+    <div class="upload-card-body upload-recent-card-body">
+      <div class="upload-card-kicker" data-upload-field="code"></div>
+      <div class="upload-card-title" data-upload-field="title"></div>
+      <div class="upload-card-meta" data-upload-field="category"></div>
+      <div class="upload-card-price" data-upload-field="price"></div>
+      <div class="upload-badges">
+        <span class="upload-badge" data-upload-field="status"></span>
+        <span class="upload-badge">Upload Saree</span>
+      </div>
+      <div class="upload-card-quantity">
+        <strong data-upload-field="quantity"></strong>
+        <button class="upload-btn compact" type="button" data-upload-action="quantity" onclick="openUploadQuantityEditor(${Number(row.rowId)})">Quantity</button>
+      </div>
+      <div class="upload-thumb-row" data-upload-card-thumbs></div>
+      <div class="upload-card-actions">
+        <button class="upload-btn" type="button" data-upload-action="detail">View Detail</button>
+        <button class="upload-btn primary" type="button" data-upload-action="approve">Approve</button>
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+function reconcileUploadCardThumbs(card, row, mainImage) {
+  const root = card.querySelector("[data-upload-card-thumbs]");
+  const items = uploadCardMediaItems(row, mainImage);
+  const existing = new Map(Array.from(root.children).map((element) => [element.dataset.uploadMediaKey, element]));
+
+  items.forEach((item, index) => {
+    let thumb = existing.get(item.key);
+    if (!thumb) {
+      thumb = document.createElement("div");
+      thumb.className = "upload-thumb";
+      thumb.dataset.uploadMediaKey = item.key;
+      thumb.title = item.label;
+      thumb.innerHTML = `<div class="upload-thumb-media upload-media-thumb"></div><span>${uploadEscapeHtml(item.label)}</span>`;
+    }
+    updateUploadMediaContainer(thumb.querySelector(".upload-thumb-media"), {
+      url: row.images[item.key],
+      label: item.label,
+      defer: true,
+      priority: "low",
+    });
+    if (root.children[index] !== thumb) root.insertBefore(thumb, root.children[index] || null);
+    existing.delete(item.key);
+  });
+  existing.forEach((element) => element.remove());
+}
+
+function updateUploadCardElement(card, row, index) {
+  const status = uploadStatusText(row);
+  const statusBadge = card.querySelector('[data-upload-field="status"]');
+  const mainImage = getUploadMainImage(row);
+  const quantity = Number(row.quantity || 1);
+
+  setUploadElementText(card, '[data-upload-field="code"]', uploadDisplay(row.productCode, "No product code"));
+  setUploadElementText(card, '[data-upload-field="title"]', uploadDisplay(row.productTitle, "Untitled Upload"));
+  setUploadElementText(card, '[data-upload-field="category"]', uploadDisplay(row.category, "No category"));
+  setUploadElementText(card, '[data-upload-field="price"]', uploadDisplay(row.price, "Price not added"));
+  setUploadElementText(card, '[data-upload-field="status"]', status);
+  setUploadElementText(card, '[data-upload-field="quantity"]', `Quantity: ${quantity}`);
+  statusBadge.className = `upload-badge ${uploadStatusClass(status)}`;
+
+  const mainContainer = card.querySelector("[data-upload-card-main]");
+  mainContainer.classList.remove("reference", "generated", "empty");
+  mainContainer.classList.add(mainImage.type);
+  updateUploadMediaContainer(mainContainer, {
+    url: mainImage.url,
+    label: mainImage.label,
+    className: "upload-card-main-img",
+    defer: index >= 2,
+    priority: index < 2 ? "high" : "low",
+  });
+  reconcileUploadCardThumbs(card, row, mainImage);
+
+  const detailButton = card.querySelector('[data-upload-action="detail"]');
+  const quantityButton = card.querySelector('[data-upload-action="quantity"]');
+  const approveButton = card.querySelector('[data-upload-action="approve"]');
+  detailButton.onclick = () => openUploadDetail(Number(row.rowId));
+  quantityButton.onclick = () => openUploadQuantityEditor(Number(row.rowId));
+  approveButton.onclick = (event) => approveUploadSareeFromCard(Number(row.rowId), event);
+  quantityButton.setAttribute("onclick", `openUploadQuantityEditor(${Number(row.rowId)})`);
+  approveButton.disabled = !canApproveUploadReviewRow(row);
+  card.dataset.uploadRowSignature = createUploadRowSignature(row);
+}
+
 function renderUploadRows({ preserveViewport = true } = {}) {
   const root = document.getElementById("uploadRecentRows");
   const count = document.getElementById("uploadRecentCount");
@@ -715,60 +914,61 @@ function renderUploadRows({ preserveViewport = true } = {}) {
     ? captureUploadViewportAnchor()
     : null;
   const visibleRows = uploadSareeState.rows.filter(shouldShowUploadReviewRow);
-  count.textContent = `${visibleRows.length} rows`;
+  const renderLimit = Math.max(UPLOAD_INITIAL_RENDER_COUNT, uploadSareeState.visibleRowLimit || 0);
+  const renderedRows = visibleRows.slice(0, renderLimit);
+  count.textContent = renderedRows.length < visibleRows.length
+    ? `${renderedRows.length} of ${visibleRows.length} rows`
+    : `${visibleRows.length} rows`;
 
   if (!visibleRows.length) {
-    root.innerHTML = `<div class="upload-empty">No uploaded sarees found.</div>`;
+    root.replaceChildren();
+    const empty = document.createElement("div");
+    empty.className = "upload-empty";
+    empty.textContent = "No uploaded sarees found.";
+    root.appendChild(empty);
+    uploadSareeState.rowSignatures.clear();
+    const loadMore = document.getElementById("uploadLoadMore");
+    if (loadMore) loadMore.hidden = true;
     restoreUploadViewportAnchor(viewportAnchor);
     return;
   }
 
-  root.innerHTML = visibleRows.map((row) => {
-    const status = uploadStatusText(row);
-    const statusClass = uploadStatusClass(status);
-    const approveDisabled = canApproveUploadReviewRow(row) ? "" : "disabled";
-    const mainImage = getUploadMainImage(row);
-    const mainImageUrl = mainImage.url;
-    const referenceThumbs = [
-      { key: "saree", label: "Saree" },
-      { key: "blouse", label: "Blouse" },
-      { key: "pallu", label: "Pallu" },
-      { key: "border", label: "Border" },
-      { key: "front", label: "Front View" },
-      { key: "side", label: "Side View" },
-      { key: "back", label: "Back View" },
-      { key: "closeUp", label: "Close-Up" },
-      { key: "blouseGrid", label: "Blouse Grid" },
-    ].filter((item) => hasUploadImage(row.images?.[item.key]));
-    const thumbs = referenceThumbs.map((item) => `
-      <div class="upload-thumb" title="${uploadEscapeAttr(item.label)}">
-        <div class="upload-thumb-media upload-media-thumb">${renderUploadZoomableImage(row.images[item.key], row.images[item.key], item.label)}</div>
-        <span>${uploadEscapeHtml(item.label)}</span>
-      </div>
-    `).join("");
+  root.querySelectorAll(":scope > .upload-empty").forEach((element) => element.remove());
+  const existingCards = new Map(Array.from(root.querySelectorAll(":scope > [data-upload-row-id]"))
+    .map((card) => [String(card.dataset.uploadRowId), card]));
+  const renderedIds = new Set();
 
-    return `
-      <article class="upload-card" data-upload-row-id="${uploadEscapeAttr(row.rowId)}">
-        <div class="upload-card-media upload-main-image upload-recent-main-media ${uploadEscapeAttr(mainImage.type)}">${renderUploadZoomableImage(mainImageUrl, mainImage.url, mainImage.label, "upload-card-main-img")}</div>
-        <div class="upload-card-body">
-          <div class="upload-card-kicker">${uploadEscapeHtml(uploadDisplay(row.productCode, "No product code"))}</div>
-          <div class="upload-card-title">${uploadEscapeHtml(uploadDisplay(row.productTitle, "Untitled Upload"))}</div>
-          <div class="upload-card-meta">${uploadEscapeHtml(uploadDisplay(row.category, "No category"))}</div>
-          <div class="upload-card-price">${uploadEscapeHtml(uploadDisplay(row.price, "Price not added"))}</div>
-          <div class="upload-badges">
-            <span class="upload-badge ${statusClass}">${uploadEscapeHtml(status)}</span>
-            <span class="upload-badge">Upload Saree</span>
-          </div>
-          <div class="upload-thumb-row">${thumbs}</div>
-          <div class="upload-card-actions">
-            <button class="upload-btn" type="button" onclick="openUploadDetail(${Number(row.rowId)})">View Detail</button>
-            <button class="upload-btn primary" type="button" ${approveDisabled} onclick="approveUploadSareeFromCard(${Number(row.rowId)})">Approve</button>
-          </div>
-        </div>
-      </article>
-    `;
-  }).join("");
+  renderedRows.forEach((row, index) => {
+    const rowKey = String(row.rowId);
+    const signature = createUploadRowSignature(row);
+    let card = existingCards.get(rowKey);
+    if (!card) card = createUploadCardElement(row);
+    if (card.dataset.uploadRowSignature !== signature) updateUploadCardElement(card, row, index);
+    if (root.children[index] !== card) root.insertBefore(card, root.children[index] || null);
+    uploadSareeState.rowSignatures.set(rowKey, signature);
+    renderedIds.add(rowKey);
+  });
+
+  existingCards.forEach((card, rowKey) => {
+    if (!renderedIds.has(rowKey)) {
+      card.querySelectorAll("img").forEach((image) => uploadImageObserver?.unobserve(image));
+      card.remove();
+      uploadSareeState.rowSignatures.delete(rowKey);
+    }
+  });
+
+  const loadMore = document.getElementById("uploadLoadMore");
+  if (loadMore) {
+    loadMore.hidden = renderedRows.length >= visibleRows.length;
+    loadMore.textContent = `Load More (${visibleRows.length - renderedRows.length} remaining)`;
+  }
+  observeUploadLazyImages(root);
   restoreUploadViewportAnchor(viewportAnchor);
+}
+
+function loadMoreUploadRows() {
+  uploadSareeState.visibleRowLimit += UPLOAD_RENDER_BATCH_SIZE;
+  renderUploadRows({ preserveViewport: true });
 }
 
 function renderUploadDetail(row = currentUploadRow(), options = {}) {
@@ -802,24 +1002,27 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
     `).join("");
   }
 
-  const referenceBlocks = [
-    { label: "Saree Image", url: row.images?.saree, empty: "Saree image not available" },
-    ...(hasUploadImage(row.images?.blouse)
-      ? [{ label: "Blouse Image", url: row.images.blouse, empty: "Blouse image not uploaded" }]
-      : []),
-    ...(hasUploadImage(row.images?.pallu)
-      ? [{ label: "Pallu Image", url: row.images.pallu, empty: "Pallu image not uploaded" }]
-      : []),
-    ...(hasUploadImage(row.images?.border)
-      ? [{ label: "Border Image", url: row.images.border, empty: "Border image not uploaded" }]
-      : []),
-  ];
-  document.getElementById("uploadReferenceImages").innerHTML = referenceBlocks.map((item) => `
-    <div class="upload-media-box">
-      <div class="upload-media-label">${uploadEscapeHtml(item.label)}</div>
-      <div class="upload-media-img upload-compare-image upload-reference-stage upload-detail-reference-stage">${hasUploadImage(item.url) ? renderUploadZoomableImage(item.url, item.url, item.label) : `<div class="upload-empty-media">${uploadEscapeHtml(item.empty)}</div>`}</div>
-    </div>
-  `).join("");
+  const detailQuantity = document.getElementById("uploadDetailQuantityValue");
+  if (detailQuantity) detailQuantity.textContent = `Quantity: ${Number(row.quantity || 1)}`;
+  const detailQuantityButton = document.getElementById("uploadDetailQuantityButton");
+  if (detailQuantityButton) detailQuantityButton.onclick = () => openUploadQuantityEditor(Number(row.rowId));
+
+  const referenceTabs = UPLOAD_REFERENCE_TABS.filter((tab) => hasUploadImage(row.images?.[tab.key]));
+  const selectedReference = referenceTabs.find((tab) => tab.key === uploadSareeState.selectedReferenceKey)
+    || referenceTabs.find((tab) => tab.key === "saree")
+    || referenceTabs[0]
+    || null;
+  uploadSareeState.selectedReferenceKey = selectedReference?.key || "";
+  const referenceRoot = document.getElementById("uploadReferenceImages");
+  referenceRoot.innerHTML = selectedReference
+    ? `<div class="upload-reference-tabs">${referenceTabs.map((tab) => `
+        <button class="upload-btn ${tab.key === selectedReference.key ? "active" : ""}" type="button" data-key="${uploadEscapeAttr(tab.key)}" onclick="selectUploadReference('${uploadEscapeAttr(tab.key)}')">${uploadEscapeHtml(tab.label)}</button>
+      `).join("")}</div>
+      <div class="upload-media-box">
+        <div class="upload-media-label">${uploadEscapeHtml(selectedReference.label)}</div>
+        <div id="uploadReferencePreview" class="upload-media-img upload-compare-image upload-reference-stage upload-detail-reference-stage">${renderUploadZoomableImage(row.images[selectedReference.key], row.images[selectedReference.key], selectedReference.label, "", { priority: "high" })}</div>
+      </div>`
+    : `<div class="upload-empty-media">No reference images available</div>`;
 
   const availableTabs = getAvailableUploadGeneratedTabs(row);
   const selected = availableTabs.find((tab) => tab.key === uploadSareeState.selectedGeneratedKey)
@@ -852,6 +1055,120 @@ function renderUploadDetail(row = currentUploadRow(), options = {}) {
   requestAnimationFrame(() => {
     bindUploadDetailActions();
   });
+}
+
+function selectUploadReference(key) {
+  const row = currentUploadRow();
+  const tab = UPLOAD_REFERENCE_TABS.find((item) => item.key === key);
+  if (!row || !tab || !hasUploadImage(row.images?.[key])) return;
+  uploadSareeState.selectedReferenceKey = key;
+  document.querySelectorAll("#uploadReferenceImages .upload-reference-tabs button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.key === key);
+  });
+  const preview = document.getElementById("uploadReferencePreview");
+  const box = preview?.closest(".upload-media-box");
+  const label = box?.querySelector(".upload-media-label");
+  if (label) label.textContent = tab.label;
+  updateUploadMediaContainer(preview, {
+    url: row.images[key],
+    label: tab.label,
+    defer: false,
+    priority: "high",
+  });
+}
+
+function openUploadQuantityEditor(rowId) {
+  const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(rowId));
+  const backdrop = document.getElementById("uploadQuantityBackdrop");
+  const input = document.getElementById("uploadQuantityInput");
+  const error = document.getElementById("uploadQuantityError");
+  if (!row || !backdrop || !input) return;
+  uploadSareeState.quantityRowId = Number(rowId);
+  input.value = String(Number(row.quantity || 1));
+  input.setAttribute("aria-invalid", "false");
+  if (error) {
+    error.hidden = true;
+    error.textContent = "";
+  }
+  backdrop.classList.add("open");
+  backdrop.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => {
+    input.focus({ preventScroll: true });
+    input.select();
+  });
+}
+
+function closeUploadQuantityEditor(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  if (uploadSareeState.quantitySaving) return;
+  const backdrop = document.getElementById("uploadQuantityBackdrop");
+  backdrop?.classList.remove("open");
+  backdrop?.setAttribute("aria-hidden", "true");
+  uploadSareeState.quantityRowId = null;
+}
+
+function handleUploadQuantityBackdrop(event) {
+  if (event.target.id === "uploadQuantityBackdrop") closeUploadQuantityEditor(event);
+}
+
+function parseUploadQuantity(value) {
+  const quantity = Number(value);
+  return Number.isInteger(quantity) && quantity >= 1 && quantity <= 99999 ? quantity : null;
+}
+
+async function saveUploadQuantity(event) {
+  event?.preventDefault();
+  const rowId = uploadSareeState.quantityRowId;
+  const input = document.getElementById("uploadQuantityInput");
+  const error = document.getElementById("uploadQuantityError");
+  const saveButton = document.getElementById("uploadQuantitySave");
+  const quantity = parseUploadQuantity(input?.value);
+  if (!rowId || quantity === null) {
+    if (input) input.setAttribute("aria-invalid", "true");
+    if (error) {
+      error.hidden = false;
+      error.textContent = "Enter a whole number from 1 to 99999.";
+    }
+    return;
+  }
+
+  uploadSareeState.quantitySaving = true;
+  if (saveButton) {
+    saveButton.disabled = true;
+    saveButton.textContent = "Saving...";
+  }
+  try {
+    const response = await uploadApiCall(`/api/upload-saree/${rowId}/quantity`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ quantity }),
+    });
+    const row = uploadSareeState.rows.find((item) => Number(item.rowId) === Number(rowId));
+    if (row) row.quantity = Number(response.quantity);
+    renderUploadRows({ preserveViewport: true });
+    if (uploadSareeState.detailOpen && Number(uploadSareeState.currentRowId) === Number(rowId)) {
+      const detailValue = document.getElementById("uploadDetailQuantityValue");
+      if (detailValue) detailValue.textContent = `Quantity: ${Number(response.quantity)}`;
+      uploadSareeState.currentDetailSignature = getUploadDetailSignature(row);
+    }
+    uploadSareeState.lastRowsSignature = stableUploadRowsSignature(uploadSareeState.rows);
+    showUploadToast(`Quantity updated to ${Number(response.quantity)}.`);
+    uploadSareeState.quantitySaving = false;
+    closeUploadQuantityEditor();
+  } catch (saveError) {
+    if (error) {
+      error.hidden = false;
+      error.textContent = saveError.message || "Unable to update quantity.";
+    }
+    showUploadToast(saveError.message || "Unable to update quantity.", true);
+  } finally {
+    uploadSareeState.quantitySaving = false;
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.textContent = "Save Quantity";
+    }
+  }
 }
 
 function captureUploadReturnNavigation(rowId) {
@@ -912,6 +1229,7 @@ function openUploadDetail(rowId) {
   uploadSareeState.detailOpen = true;
   uploadSareeState.currentRowId = rowId;
   uploadSareeState.selectedRowId = rowId;
+  uploadSareeState.selectedReferenceKey = "saree";
   uploadSareeState.selectedGeneratedKey = "front";
   uploadSareeState.currentDetailSignature = getUploadDetailSignature(row);
   uploadSareeState.detailLastScrollTop = 0;
@@ -1099,6 +1417,11 @@ function handleUploadZoomClick(event) {
   if (!trigger) return;
   event.preventDefault();
   event.stopPropagation();
+  if (trigger.dataset.uploadRetryImage === "true") {
+    const image = trigger.querySelector("img[data-original-src]");
+    if (image) retryUploadImage(image, { reset: true });
+    return;
+  }
   openUploadImageViewer(trigger.dataset.uploadZoomUrl, trigger.dataset.uploadZoomLabel || "Upload image");
 }
 
@@ -1149,6 +1472,8 @@ function handleUploadViewerPointerEnd(event) {
 function handleUploadViewerKeydown(event) {
   if (event.key === "Escape" && document.getElementById("uploadImageFullscreen")?.classList.contains("open")) {
     closeUploadImageFullscreen(event);
+  } else if (event.key === "Escape" && document.getElementById("uploadQuantityBackdrop")?.classList.contains("open")) {
+    closeUploadQuantityEditor(event);
   }
 }
 
@@ -1174,12 +1499,7 @@ async function selectUploadGenerated(key) {
     renderMissingUploadGeneratedView(row, key);
     return;
   }
-  const loaded = await preloadUploadImage(url);
   uploadSareeState.selectedGeneratedKey = key;
-  if (!loaded) {
-    renderMissingUploadGeneratedView(row, key);
-    return;
-  }
   renderUploadGeneratedStage(row, key, url);
   updateUploadGeneratedTabs();
 }
@@ -1554,7 +1874,7 @@ function setUploadSareeActive(active) {
   if (active) {
     if (!uploadSareeState.loaded) {
       uploadSareeState.loaded = true;
-      loadUploadStatus().finally(() => loadRecentUploadSarees({ force: true, preserveDetail: true, silent: true }));
+      loadUploadStatus().finally(() => loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true }));
     } else {
       loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true });
     }
@@ -1568,6 +1888,7 @@ function startUploadAutoSync() {
   stopUploadAutoSync();
   uploadSareeState.syncTimer = setInterval(() => {
     if (!uploadSareeState.active) return;
+    if (document.visibilityState !== "visible") return;
     if (uploadSareeState.submitting) return;
     if (uploadSareeState.detailOpen && isMobileUploadView()) {
       uploadSareeState.syncAfterDetailClose = true;
@@ -1575,6 +1896,14 @@ function startUploadAutoSync() {
     }
     loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true });
   }, 15000);
+}
+
+function handleUploadVisibilityChange() {
+  clearTimeout(uploadSareeState.visibilityRefreshTimer);
+  if (document.visibilityState !== "visible" || !uploadSareeState.active) return;
+  uploadSareeState.visibilityRefreshTimer = setTimeout(() => {
+    loadRecentUploadSarees({ force: false, preserveDetail: true, silent: true });
+  }, 300);
 }
 
 function stopUploadAutoSync() {
@@ -1925,6 +2254,8 @@ document.addEventListener("DOMContentLoaded", () => {
   enhanceUploadFileInputs();
   document.addEventListener("click", handleUploadZoomClick);
   document.addEventListener("keydown", handleUploadViewerKeydown);
+  document.addEventListener("visibilitychange", handleUploadVisibilityChange);
+  document.getElementById("uploadQuantityForm")?.addEventListener("submit", saveUploadQuantity);
   document.getElementById("uploadZoomOut")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale - 0.25));
   document.getElementById("uploadZoomIn")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale + 0.25));
   document.getElementById("uploadZoomFit")?.addEventListener("click", fitUploadViewer);
@@ -1949,5 +2280,10 @@ window.approveUploadSaree = approveUploadSaree;
 window.rejectUploadSaree = rejectUploadSaree;
 window.requestUploadChanges = requestUploadChanges;
 window.approveUploadSareeFromCard = approveUploadSareeFromCard;
+window.selectUploadReference = selectUploadReference;
+window.openUploadQuantityEditor = openUploadQuantityEditor;
+window.closeUploadQuantityEditor = closeUploadQuantityEditor;
+window.handleUploadQuantityBackdrop = handleUploadQuantityBackdrop;
+window.loadMoreUploadRows = loadMoreUploadRows;
 window.submitUploadSareeDirect = submitUploadSareeDirect;
 window.uploadState = uploadSareeState;

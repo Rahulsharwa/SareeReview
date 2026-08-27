@@ -1487,6 +1487,7 @@
           <div id="uploadRecentRows" class="upload-card-grid">
             <div class="upload-empty">No uploaded rows loaded yet.</div>
           </div>
+          <button id="uploadLoadMore" class="upload-btn upload-load-more" type="button" onclick="loadMoreUploadRows()" hidden>Load More</button>
         </section>
       </section>
     </section>
@@ -1503,6 +1504,10 @@
       </header>
       <main id="uploadDetailBody" class="upload-detail-body">
         <section id="uploadProductInformation" class="upload-detail-information" hidden></section>
+        <section class="upload-detail-quantity" aria-label="Product quantity">
+          <strong id="uploadDetailQuantityValue">Quantity: 1</strong>
+          <button id="uploadDetailQuantityButton" class="upload-btn compact" type="button">Quantity</button>
+        </section>
         <section class="upload-detail-compare">
           <section class="compare-panel reference-panel">
             <h3>Reference Images</h3>
@@ -1572,6 +1577,35 @@
         <button id="uploadApproveButton" type="button" class="upload-action-approve" onclick="approveUploadCurrent(event)">Approve</button>
       </div>
     </section>
+  </div>
+
+  <div
+    id="uploadQuantityBackdrop"
+    class="upload-quantity-backdrop"
+    aria-hidden="true"
+    onclick="handleUploadQuantityBackdrop(event)"
+  >
+    <form
+      id="uploadQuantityForm"
+      class="upload-quantity-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="uploadQuantityTitle"
+      novalidate
+      onclick="event.stopPropagation()"
+    >
+      <header>
+        <h3 id="uploadQuantityTitle">Update Quantity</h3>
+        <button class="upload-icon-btn" type="button" onclick="closeUploadQuantityEditor(event)" aria-label="Close quantity editor">x</button>
+      </header>
+      <label for="uploadQuantityInput">Quantity</label>
+      <input id="uploadQuantityInput" type="number" min="1" max="99999" step="1" inputmode="numeric" required />
+      <p id="uploadQuantityError" class="upload-quantity-error" role="alert" hidden></p>
+      <div class="upload-quantity-actions">
+        <button class="upload-btn" type="button" onclick="closeUploadQuantityEditor(event)">Cancel</button>
+        <button id="uploadQuantitySave" class="upload-btn primary" type="submit">Save Quantity</button>
+      </div>
+    </form>
   </div>
 
   <div

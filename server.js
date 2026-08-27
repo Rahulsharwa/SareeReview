@@ -74,15 +74,16 @@ const UPLOAD_DIRECT_STORAGE_ENABLED = String(process.env.UPLOAD_DIRECT_STORAGE_E
 const UPLOAD_BLOB_CONFIGURED = Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN);
 const UPLOAD_BLOB_PREFIX = String(process.env.UPLOAD_BLOB_PREFIX || "upload-saree/staging").replace(/^\/+|\/+$/g, "");
 const UPLOAD_BLOB_ACCESS = "private";
-const UPLOAD_SAREE_CACHE_VERSION = "v8";
+const UPLOAD_SAREE_CACHE_VERSION = "v9";
 const UPLOAD_RECENT_CACHE_KEY_V1 = `${CACHE_PREFIX}upload-saree:recent:v1`;
 const UPLOAD_RECENT_CACHE_KEY_V2 = `${CACHE_PREFIX}upload-saree:recent:v2`;
 const UPLOAD_RECENT_CACHE_KEY_V4 = `${CACHE_PREFIX}upload-saree:recent:v4`;
 const UPLOAD_RECENT_CACHE_KEY_V5 = `${CACHE_PREFIX}upload-saree:recent:v5`;
 const UPLOAD_RECENT_CACHE_KEY_V6 = `${CACHE_PREFIX}upload-saree:recent:v6`;
 const UPLOAD_RECENT_CACHE_KEY_V7 = `${CACHE_PREFIX}upload-saree:recent:v7`;
+const UPLOAD_RECENT_CACHE_KEY_V8 = `${CACHE_PREFIX}upload-saree:recent:v8`;
 const UPLOAD_RECENT_CACHE_KEY = `${CACHE_PREFIX}upload-saree:recent:${UPLOAD_SAREE_CACHE_VERSION}`;
-const UPLOAD_FIELDS_CACHE_KEY = `${CACHE_PREFIX}upload-saree:fields:v1`;
+const UPLOAD_FIELDS_CACHE_KEY = `${CACHE_PREFIX}upload-saree:fields:v2`;
 const UPLOAD_RECENT_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_RECENT_SECONDS || 15);
 const UPLOAD_FIELDS_CACHE_TTL_SECONDS = Number(process.env.UPLOAD_CACHE_TTL_FIELDS_SECONDS || 86400);
 const UPLOAD_IMAGE_MIME_TYPES = new Set(
@@ -109,6 +110,7 @@ const UPLOAD_FIELDS = {
   sideView: process.env.UPLOAD_FIELD_SIDE_VIEW || "9535580",
   closeUp: process.env.UPLOAD_FIELD_CLOSE_UP || "9535581",
   blouseGrid: process.env.UPLOAD_FIELD_BLOUSE_GRID || "9902236",
+  qualityScore: process.env.UPLOAD_FIELD_QUALITY_SCORE || "10424794",
 };
 const UPLOAD_GENERATION_STATUS = {
   start: process.env.UPLOAD_GENERATION_STATUS_START || "Start",
@@ -2018,23 +2020,11 @@ async function uploadBaserowFile(file) {
   });
 }
 
-function firstUploadMedia(value) {
+function getOriginalBaserowImageUrl(value) {
   const file = Array.isArray(value) ? value[0] : value;
-  if (!file) return { url: "", thumbnailUrl: "" };
-  if (typeof file === "string") return { url: file, thumbnailUrl: file };
-
-  const url = file.url
-    || file.thumbnails?.large?.url
-    || file.thumbnails?.card_cover?.url
-    || file.thumbnails?.small?.url
-    || file.thumbnails?.tiny?.url
-    || "";
-  const thumbnailUrl = file.thumbnails?.tiny?.url
-    || file.thumbnails?.small?.url
-    || file.thumbnails?.card_cover?.url
-    || file.thumbnails?.large?.url
-    || url;
-  return { url, thumbnailUrl };
+  if (!file) return "";
+  if (typeof file === "string") return file;
+  return typeof file.url === "string" ? file.url : "";
 }
 
 function readUploadField(row, name) {
@@ -2057,8 +2047,16 @@ function readUploadField(row, name) {
     sideView: "Side View",
     closeUp: "Close-Up",
     blouseGrid: "BlouseGrid",
+    qualityScore: "Quality Score",
   };
   return row[displayNames[name]];
+}
+
+function normalizeUploadQuantity(value) {
+  if (value === null || value === undefined || value === "") return 1;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return 1;
+  return Math.floor(number);
 }
 
 function normalizeUploadRow(row = {}) {
@@ -2069,16 +2067,16 @@ function normalizeUploadRow(row = {}) {
   const generationStatus = normalizeSocialText(readUploadField(row, "generationStatus"));
   const descriptions = normalizeSocialText(readUploadField(row, "descriptions"));
   const commentNotes = normalizeSocialText(readUploadField(row, "commentNotes"));
-  const media = {
-    saree: firstUploadMedia(readUploadField(row, "sareeImage")),
-    blouse: firstUploadMedia(readUploadField(row, "blouseImage")),
-    pallu: firstUploadMedia(readUploadField(row, "palluImage")),
-    border: firstUploadMedia(readUploadField(row, "borderImage")),
-    front: firstUploadMedia(readUploadField(row, "frontView")),
-    side: firstUploadMedia(readUploadField(row, "sideView")),
-    back: firstUploadMedia(readUploadField(row, "backView")),
-    closeUp: firstUploadMedia(readUploadField(row, "closeUp")),
-    blouseGrid: firstUploadMedia(readUploadField(row, "blouseGrid")),
+  const images = {
+    saree: getOriginalBaserowImageUrl(readUploadField(row, "sareeImage")),
+    blouse: getOriginalBaserowImageUrl(readUploadField(row, "blouseImage")),
+    pallu: getOriginalBaserowImageUrl(readUploadField(row, "palluImage")),
+    border: getOriginalBaserowImageUrl(readUploadField(row, "borderImage")),
+    front: getOriginalBaserowImageUrl(readUploadField(row, "frontView")),
+    side: getOriginalBaserowImageUrl(readUploadField(row, "sideView")),
+    back: getOriginalBaserowImageUrl(readUploadField(row, "backView")),
+    closeUp: getOriginalBaserowImageUrl(readUploadField(row, "closeUp")),
+    blouseGrid: getOriginalBaserowImageUrl(readUploadField(row, "blouseGrid")),
   };
   return {
     rowId: row.id,
@@ -2089,8 +2087,8 @@ function normalizeUploadRow(row = {}) {
     generationStatus,
     descriptions,
     commentNotes,
-    images: Object.fromEntries(Object.entries(media).map(([key, item]) => [key, item.url])),
-    thumbnails: Object.fromEntries(Object.entries(media).map(([key, item]) => [key, item.thumbnailUrl])),
+    quantity: normalizeUploadQuantity(readUploadField(row, "qualityScore")),
+    images,
   };
 }
 
@@ -2216,6 +2214,7 @@ function buildUploadCreatePayload({
 async function clearUploadCache() {
   await cacheDelete([
     UPLOAD_RECENT_CACHE_KEY,
+    UPLOAD_RECENT_CACHE_KEY_V8,
     UPLOAD_RECENT_CACHE_KEY_V7,
     UPLOAD_RECENT_CACHE_KEY_V6,
     UPLOAD_RECENT_CACHE_KEY_V5,
@@ -2223,6 +2222,49 @@ async function clearUploadCache() {
     UPLOAD_RECENT_CACHE_KEY_V2,
     UPLOAD_RECENT_CACHE_KEY_V1,
   ]);
+}
+
+function validateUploadQuantity(value) {
+  const quantity = Number(value);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99999) {
+    const error = new Error("Quantity must be a whole number from 1 to 99999.");
+    error.status = 400;
+    throw error;
+  }
+  return quantity;
+}
+
+function getUploadQuantityField(fields) {
+  const field = fields.find((item) => Number(item.id) === Number(UPLOAD_FIELDS.qualityScore));
+  if (!field || normalizeSocialText(field.name).toLowerCase() !== "quality score") {
+    const error = new Error("Quality Score field 10424794 is not configured on the Upload Saree table.");
+    error.status = 500;
+    throw error;
+  }
+  if (!/^(number|integer|text|long_text)$/i.test(String(field.type || ""))) {
+    const error = new Error("Quality Score field type does not support quantity values.");
+    error.status = 500;
+    throw error;
+  }
+  return field;
+}
+
+async function patchUploadSareeQuantity(rowIdValue, quantityValue) {
+  if (!/^\d+$/.test(String(rowIdValue || "")) || Number(rowIdValue) < 1) {
+    const error = new Error("Invalid upload rowId.");
+    error.status = 400;
+    throw error;
+  }
+  const quantity = validateUploadQuantity(quantityValue);
+  const { fields } = await getUploadFieldMetadata();
+  const field = getUploadQuantityField(fields);
+  const fieldValue = /text/i.test(String(field.type || "")) ? String(quantity) : quantity;
+  await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/${rowIdValue}/?user_field_names=false`, {
+    method: "PATCH",
+    body: JSON.stringify({ [uploadFieldKey("qualityScore")]: fieldValue }),
+  });
+  await clearUploadCache();
+  return { rowId: Number(rowIdValue), quantity };
 }
 
 async function patchUploadSareeStatus(rowId, status, feedback = "", { requiredCurrentStatuses = [] } = {}) {
@@ -3185,6 +3227,18 @@ app.get("/api/upload-saree/recent", requireSocialReviewAuth, async (req, res) =>
       ok: false,
       error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to load uploaded sarees.",
     });
+  }
+});
+
+app.patch("/api/upload-saree/:rowId/quantity", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const result = await patchUploadSareeQuantity(req.params.rowId, req.body?.quantity);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    const safeMessage = error.status === 400
+      ? error.message
+      : "Unable to update Upload Saree quantity.";
+    res.status(error.status || 500).json({ ok: false, error: safeMessage });
   }
 });
 
