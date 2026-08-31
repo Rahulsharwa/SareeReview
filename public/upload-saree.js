@@ -7,7 +7,7 @@ const UPLOAD_API = {
   reviewAuth: "/api/review-auth",
 };
 
-window.JSH_UPLOAD_BUILD = "blob-client-upload-v5-heic-png";
+window.JSH_UPLOAD_BUILD = "blob-auth-fix-v6";
 
 const uploadSareeState = {
   active: false,
@@ -135,7 +135,8 @@ function uploadDisplay(value, fallback) {
   return text || fallback;
 }
 
-function uploadGenerationStatusValue(row = {}) {
+function uploadGenerationStatusValue(row) {
+  if (!row || typeof row !== "object") return "";
   return row.generationStatus
     ?? row.status
     ?? row["Generation Status"]
@@ -150,11 +151,13 @@ function normalizeUploadGenerationStatus(value) {
 }
 
 function shouldShowUploadReviewRow(row) {
+  if (!row || typeof row !== "object") return false;
   const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
   return status === "pending" || status === "completed";
 }
 
 function canApproveUploadReviewRow(row) {
+  if (!row || typeof row !== "object") return false;
   const status = normalizeUploadGenerationStatus(uploadGenerationStatusValue(row));
   if (status === "completed") return true;
   return status === "pending" && hasUploadImage(row?.images?.front);
@@ -366,6 +369,43 @@ function showUploadToast(message, isError = false) {
   toast.classList.add("show");
   clearTimeout(showUploadToast.timer);
   showUploadToast.timer = setTimeout(() => toast.classList.remove("show"), 3200);
+}
+
+function safeUploadUiErrorMessage(error) {
+  return String(error?.message || error || "Upload action failed.")
+    .replace(/(?:Bearer\s+|vercel_blob_(?:rw|client)_)[a-zA-Z0-9._-]+/gi, "[redacted]")
+    .slice(0, 300);
+}
+
+function handleUploadUiError(error, fallbackMessage = "Upload action failed. Please retry.") {
+  const safeMessage = safeUploadUiErrorMessage(error);
+  console.error("Upload UI action failed", { message: safeMessage });
+  setUploadMessage(fallbackMessage, true);
+  showUploadToast(fallbackMessage, true);
+}
+
+function runUploadUiAction(action, fallbackMessage) {
+  try {
+    return Promise.resolve(action()).catch((error) => handleUploadUiError(error, fallbackMessage));
+  } catch (error) {
+    handleUploadUiError(error, fallbackMessage);
+    return Promise.resolve();
+  }
+}
+
+function directUploadErrorMessage(error, label) {
+  const config = uploadSareeState.publicConfig || {};
+  if (!config.blobConfigured || config.blob?.configured === false) {
+    return "Upload storage is not configured.";
+  }
+  const message = safeUploadUiErrorMessage(error).toLowerCase();
+  if (error instanceof TypeError || message.includes("network request")) {
+    return "The image upload could not reach storage. Check your connection and retry.";
+  }
+  if (message.includes("vercel blob") || message.includes("client token") || message.includes("403") || message.includes("not allowed")) {
+    return "Image upload authorization failed. Please retry.";
+  }
+  return `${label} could not be uploaded. No Baserow row was created.`;
 }
 
 async function uploadAuthenticate() {
@@ -1650,7 +1690,7 @@ async function submitUploadSareeDirect(form) {
         });
       } catch (error) {
         if (error?.name === "AbortError") throw error;
-        throw new Error(`${item.label} could not be uploaded. No Baserow row was created.`);
+        throw new Error(directUploadErrorMessage(error, item.label));
       } finally {
         clearTimeout(timeoutId);
       }
@@ -1706,17 +1746,16 @@ async function submitUploadSareeDirect(form) {
   }
 }
 
-function setUploadActionLoading(loading) {
-  const row = currentUploadRow();
-  const approveAllowed = canApproveUploadReviewRow(row);
-  [
-    "uploadRejectButton",
-    "uploadRequestChangesButton",
-    "uploadApproveButton",
-  ].forEach((id) => {
-    const button = document.getElementById(id);
-    if (!button) return;
-    button.disabled = Boolean(loading) || (id === "uploadApproveButton" && !approveAllowed);
+function setUploadActionLoading(loading, row = null) {
+  const approveAllowed = Boolean(row) && canApproveUploadReviewRow(row);
+  const buttons = [
+    ...["uploadRejectButton", "uploadRequestChangesButton", "uploadApproveButton"]
+      .map((id) => document.getElementById(id)),
+    ...document.querySelectorAll(".upload-detail-footer button"),
+  ].filter(Boolean);
+  buttons.forEach((button) => {
+    const isApprove = button.id === "uploadApproveButton" || button.id === "uploadApproveBtn";
+    button.disabled = Boolean(loading) || (isApprove && !approveAllowed);
     button.setAttribute("aria-busy", loading ? "true" : "false");
   });
 }
@@ -1742,7 +1781,7 @@ async function updateUploadStatus(action, event) {
     return;
   }
 
-  setUploadActionLoading(true);
+  setUploadActionLoading(true, row);
   try {
     const approvedRowId = row.rowId;
     if (!uploadSareeState.returnNavigation || Number(uploadSareeState.returnNavigation.rowId) !== Number(approvedRowId)) {
@@ -1777,27 +1816,27 @@ async function updateUploadStatus(action, event) {
     setUploadMessage(message, true);
     showUploadToast(message, true);
   } finally {
-    setUploadActionLoading(false);
+    setUploadActionLoading(false, currentUploadRow());
   }
 }
 
 function approveUploadSaree(event) {
-  updateUploadStatus("approve", event);
+  return runUploadUiAction(() => updateUploadStatus("approve", event), "Unable to approve the saree.");
 }
 
 function approveUploadSareeFromCard(rowId, event) {
   event?.preventDefault();
   event?.stopPropagation();
   uploadSareeState.selectedRowId = rowId;
-  updateUploadStatus("approve", event);
+  return runUploadUiAction(() => updateUploadStatus("approve", event), "Unable to approve the saree.");
 }
 
 function rejectUploadSaree(event) {
-  updateUploadStatus("reject", event);
+  return runUploadUiAction(() => updateUploadStatus("reject", event), "Unable to reject the saree.");
 }
 
 function requestUploadChanges(event) {
-  updateUploadStatus("request-changes", event);
+  return runUploadUiAction(() => updateUploadStatus("request-changes", event), "Unable to request changes.");
 }
 
 function getUploadFeedbackValue() {
@@ -1839,15 +1878,15 @@ function handleUploadReviewActionsBackdrop(event) {
 }
 
 function approveUploadCurrent(event) {
-  updateUploadStatus("approve", event);
+  return approveUploadSaree(event);
 }
 
 function rejectUploadCurrent(event) {
-  updateUploadStatus("reject", event);
+  return rejectUploadSaree(event);
 }
 
 function requestChangesUploadCurrent(event) {
-  updateUploadStatus("request-changes", event);
+  return requestUploadChanges(event);
 }
 
 function bindUploadDetailActions() {
@@ -2248,14 +2287,20 @@ function renderUploadRolePreview(role) {
 
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("uploadSareeForm");
-  if (form) form.addEventListener("submit", submitUploadSaree);
+  if (form) {
+    form.addEventListener("submit", (event) => {
+      void runUploadUiAction(() => submitUploadSaree(event), "Upload failed. Please retry.");
+    });
+  }
   document.getElementById("uploadCancelButton")?.addEventListener("click", cancelUploadSaree);
   bindUploadDetailActions();
   enhanceUploadFileInputs();
   document.addEventListener("click", handleUploadZoomClick);
   document.addEventListener("keydown", handleUploadViewerKeydown);
   document.addEventListener("visibilitychange", handleUploadVisibilityChange);
-  document.getElementById("uploadQuantityForm")?.addEventListener("submit", saveUploadQuantity);
+  document.getElementById("uploadQuantityForm")?.addEventListener("submit", (event) => {
+    void runUploadUiAction(() => saveUploadQuantity(event), "Unable to update quantity.");
+  });
   document.getElementById("uploadZoomOut")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale - 0.25));
   document.getElementById("uploadZoomIn")?.addEventListener("click", () => setUploadViewerScale(uploadSareeState.viewerScale + 0.25));
   document.getElementById("uploadZoomFit")?.addEventListener("click", fitUploadViewer);

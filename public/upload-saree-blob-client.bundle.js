@@ -6595,22 +6595,38 @@ ${newlined}
   }
   window.uploadSareeFileToBlob = async function uploadSareeFileToBlob({ file, role, onProgress, signal }) {
     const contentType = file.type === "image/jpg" ? "image/jpeg" : file.type;
-    return upload(safeUploadFilename(file, role), file, {
-      access: "private",
-      handleUploadUrl: "/api/upload-saree/blob-upload",
-      clientPayload: JSON.stringify({
+    const pathname = safeUploadFilename(file, role);
+    try {
+      return await upload(pathname, file, {
+        access: "private",
+        handleUploadUrl: "/api/upload-saree/blob-upload",
+        clientPayload: JSON.stringify({
+          role,
+          originalFilename: file.name,
+          declaredSize: file.size,
+          mimeType: contentType
+        }),
+        contentType,
+        onUploadProgress(progressEvent) {
+          onProgress?.(progressEvent);
+        },
+        abortSignal: signal
+      });
+    } catch (error) {
+      const status = Number(error?.status || error?.statusCode || error?.response?.status) || null;
+      const message2 = String(error?.message || error || "Blob upload failed.").replace(/(?:Bearer\s+|vercel_blob_(?:rw|client)_)[a-zA-Z0-9._-]+/gi, "[redacted]").slice(0, 300);
+      console.error("Blob direct upload failed", {
         role,
-        originalFilename: file.name,
-        declaredSize: file.size,
-        mimeType: contentType
-      }),
-      contentType,
-      multipart: true,
-      onUploadProgress(progressEvent) {
-        onProgress?.(progressEvent);
-      },
-      abortSignal: signal
-    });
+        filename: file.name,
+        size: file.size,
+        type: contentType,
+        pathname,
+        multipart: false,
+        status,
+        message: message2
+      });
+      throw error;
+    }
   };
 })();
 /*! Bundled license information:
