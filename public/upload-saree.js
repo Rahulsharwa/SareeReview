@@ -4,10 +4,11 @@ const UPLOAD_API = {
   upload: "/api/upload-saree",
   finalize: "/api/upload-saree/finalize",
   cleanupUpload: "/api/upload-saree/cleanup-upload",
+  submissions: "/api/upload-saree/submissions",
   reviewAuth: "/api/review-auth",
 };
 
-window.JSH_UPLOAD_BUILD = "blob-auth-fix-v6";
+window.JSH_UPLOAD_BUILD = "baserow-form-provider-v1";
 
 const uploadSareeState = {
   active: false,
@@ -44,6 +45,7 @@ const uploadSareeState = {
   viewerPointers: new Map(),
   viewerPinchDistance: 0,
   directStorageEnabled: false,
+  storageProvider: "vercel_blob",
   publicConfig: {},
   clientTimeoutMs: 900000,
   allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png", "image/webp"],
@@ -58,6 +60,10 @@ const uploadSareeState = {
   uploadTimedOut: false,
   uploadAbortController: null,
   uploadedBlobPaths: [],
+  submissionId: null,
+  submissionFingerprint: "",
+  uploadedBaserowFiles: { saree: null, blouse: null, pallu: null, border: null },
+  retryCheckRequired: false,
   successMessageTimer: null,
   sareeFile: null,
   blouseFile: null,
@@ -516,6 +522,18 @@ function isHeicUploadFile(file) {
   return HEIC_UPLOAD_MIME_TYPES.has(mimeType) || HEIC_UPLOAD_EXTENSIONS.has(getFileExtension(file.name));
 }
 
+function effectiveUploadMimeType(file) {
+  const mimeType = String(file?.type || "").trim().toLowerCase();
+  if (mimeType) return mimeType;
+  const extension = getFileExtension(file?.name);
+  if (extension === "heic") return "image/heic";
+  if (extension === "heif") return "image/heif";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  return "";
+}
+
 function validateUploadImageFile(file, label) {
   if (!file) return;
   const mimeType = String(file.type || "").trim().toLowerCase();
@@ -537,7 +555,11 @@ function validateUploadImageFile(file, label) {
 function validateStoredUploadImageFile(file) {
   const mimeType = String(file?.type || "").trim().toLowerCase();
   const extension = getFileExtension(file?.name);
-  if (!(file instanceof File) || !STORED_UPLOAD_MIME_TYPES.has(mimeType) || !STORED_UPLOAD_EXTENSIONS.has(extension)) {
+  const baserowForm = uploadSareeState.storageProvider === "baserow_form";
+  const allowedMimeTypes = baserowForm ? ALLOWED_UPLOAD_MIME_TYPES : STORED_UPLOAD_MIME_TYPES;
+  const allowedExtensions = baserowForm ? ALLOWED_UPLOAD_EXTENSIONS : STORED_UPLOAD_EXTENSIONS;
+  const allowedMime = allowedMimeTypes.has(mimeType) || (baserowForm && !mimeType && HEIC_UPLOAD_EXTENSIONS.has(extension));
+  if (!(file instanceof File) || !allowedMime || !allowedExtensions.has(extension)) {
     throw new Error("The image could not be prepared for upload.");
   }
   if (file.size <= 0 || file.size > getMaxUploadSizeBytes()) {
@@ -567,6 +589,25 @@ function getSelectedUploadFiles() {
       required: config.required,
     };
   }).filter((item) => item.file instanceof File);
+}
+
+function resetBaserowSubmissionClientState() {
+  uploadSareeState.submissionId = null;
+  uploadSareeState.submissionFingerprint = "";
+  uploadSareeState.uploadedBaserowFiles = { saree: null, blouse: null, pallu: null, border: null };
+  uploadSareeState.retryCheckRequired = false;
+}
+
+function uploadSubmissionFingerprint(form, selectedItems) {
+  return JSON.stringify({
+    productTitle: getUploadInputValue(form, "productTitle"),
+    productCode: getUploadInputValue(form, "productCode"),
+    category: getUploadInputValue(form, "category"),
+    price: getUploadInputValue(form, "price"),
+    descriptions: getUploadInputValue(form, "descriptions"),
+    commentNotes: getUploadInputValue(form, "commentNotes"),
+    files: selectedItems.map((item) => ({ role: item.role, name: item.file.name, size: item.file.size, type: item.file.type })),
+  });
 }
 
 function validateSelectedUploadFiles() {
@@ -691,6 +732,7 @@ async function loadUploadStatus() {
   try {
     const data = await uploadApiCall(UPLOAD_API.status);
     uploadSareeState.publicConfig = data || {};
+    uploadSareeState.storageProvider = String(data.storageProvider || "vercel_blob");
     uploadSareeState.maxFileSizeMb = Number(data.maxUploadSizeMb || data.maxFileSizeMb || 50);
     uploadSareeState.maxHeicDecodePixels = Number(data.maxHeicDecodePixels || 100000000);
     uploadSareeState.directStorageEnabled = Boolean(data.directStorageEnabled);
@@ -701,7 +743,7 @@ async function loadUploadStatus() {
     panel.className = `upload-status ${data.ok ? "ok" : "error"}`;
     panel.textContent = data.ok
       ? `Upload backend connected - Table ${data.tableId}`
-      : `Upload backend not configured: ${(data.missing || []).join(", ")}`;
+      : data.message || `Upload backend not configured: ${(data.missing || []).join(", ")}`;
     return data;
   } catch (error) {
     panel.className = "upload-status error";
@@ -719,6 +761,7 @@ async function loadRecentUploadSarees(options = {}) {
     force = false,
     preserveDetail = true,
     silent = false,
+    submissionId = "",
   } = options;
   const root = document.getElementById("uploadRecentRows");
   if (uploadSareeState.isSyncing) return;
@@ -730,7 +773,10 @@ async function loadRecentUploadSarees(options = {}) {
   try {
     uploadSareeState.isSyncing = true;
     uploadSareeState.loadingRecent = true;
-    const response = await fetch(`${UPLOAD_API.recent}${force ? "?refresh=1" : ""}`, {
+    const params = new URLSearchParams();
+    if (force) params.set("refresh", "1");
+    if (submissionId) params.set("submissionId", submissionId);
+    const response = await fetch(`${UPLOAD_API.recent}${params.size ? `?${params.toString()}` : ""}`, {
       method: "GET",
       headers: { Accept: "application/json" },
       cache: "no-store",
@@ -739,7 +785,7 @@ async function loadRecentUploadSarees(options = {}) {
     if (response.status === 401 && data.error === "Review password required.") {
       await uploadAuthenticate();
       uploadSareeState.isSyncing = false;
-      return loadRecentUploadSarees({ force, preserveDetail, silent });
+      return loadRecentUploadSarees({ force, preserveDetail, silent, submissionId });
     }
     if (!response.ok) throw new Error(data.error || data.message || "Unable to load uploaded sarees.");
 
@@ -774,6 +820,7 @@ async function loadRecentUploadSarees(options = {}) {
     }
 
     if (!silent) showUploadToast("Upload saree data synced.");
+    return data;
   } catch (error) {
     console.error("Upload recent sync failed:", error);
     if (!uploadSareeState.rows.length) {
@@ -1556,6 +1603,167 @@ function isRunningOnVercelProduction() {
   );
 }
 
+async function createBaserowSubmissionSession(form, selectedItems, fingerprint) {
+  const data = await uploadApiCall(UPLOAD_API.submissions, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      productTitle: getUploadInputValue(form, "productTitle"),
+      productCode: getUploadInputValue(form, "productCode"),
+      category: getUploadInputValue(form, "category"),
+      files: selectedItems.map((item) => ({
+        role: item.role,
+        name: item.file.name,
+        size: item.file.size,
+        mimeType: effectiveUploadMimeType(item.file),
+      })),
+    }),
+  });
+  uploadSareeState.submissionId = data.submissionId;
+  uploadSareeState.submissionFingerprint = fingerprint;
+  uploadSareeState.retryCheckRequired = false;
+  return data;
+}
+
+function uploadFileToBaserowForm(file, endpoint, signal, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    xhr.open("POST", endpoint, true);
+    xhr.responseType = "json";
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    });
+    xhr.addEventListener("load", () => {
+      signal?.removeEventListener("abort", abort);
+      const data = xhr.response && typeof xhr.response === "object"
+        ? xhr.response
+        : (() => { try { return JSON.parse(xhr.responseText || "{}"); } catch { return {}; } })();
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const error = new Error(data?.detail || data?.error || `Baserow file upload failed with ${xhr.status}.`);
+        error.definitive = true;
+        error.status = xhr.status;
+        reject(error);
+        return;
+      }
+      const name = String(data?.name || "").trim();
+      if (!/^[A-Za-z0-9._-]{1,255}$/.test(name)) {
+        reject(Object.assign(new Error("Baserow returned an invalid file reference."), { definitive: true }));
+        return;
+      }
+      resolve({ name });
+    });
+    xhr.addEventListener("error", () => reject(new TypeError("The Baserow file upload could not reach storage.")));
+    xhr.addEventListener("abort", () => reject(new DOMException("Upload cancelled.", "AbortError")));
+    signal?.addEventListener("abort", abort, { once: true });
+    const body = new FormData();
+    body.append("file", file, file.name);
+    xhr.send(body);
+  });
+}
+
+async function trackBaserowUploadedFile(submissionId, role, name) {
+  await uploadApiCall(`${UPLOAD_API.submissions}/${encodeURIComponent(submissionId)}/files/${encodeURIComponent(role)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+async function setTrackedBaserowSubmissionStatus(status) {
+  if (!uploadSareeState.submissionId) return;
+  await uploadApiCall(`${UPLOAD_API.submissions}/${encodeURIComponent(uploadSareeState.submissionId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+function buildBaserowFormPayload(form) {
+  const config = uploadSareeState.publicConfig?.form || {};
+  const fields = config.fields || {};
+  const payload = {
+    [`field_${fields.generationStatus}`]: Number(config.startOptionId),
+  };
+  const append = (fieldId, value) => {
+    const normalized = String(value || "").trim();
+    if (fieldId && normalized) payload[`field_${fieldId}`] = normalized;
+  };
+  append(fields.productTitle, getUploadInputValue(form, "productTitle"));
+  append(fields.productCode, getUploadInputValue(form, "productCode"));
+  append(fields.category, getUploadInputValue(form, "category"));
+  const rawPrice = String(getUploadInputValue(form, "price") || "").trim();
+  if (fields.price && rawPrice) {
+    const price = Number(rawPrice);
+    if (!Number.isFinite(price)) throw Object.assign(new Error("Price must be a valid number."), { definitive: true });
+    payload[`field_${fields.price}`] = price;
+  }
+  append(fields.descriptions, getUploadInputValue(form, "descriptions"));
+  append(fields.commentNotes, getUploadInputValue(form, "commentNotes"));
+
+  UPLOAD_REFERENCE_ROLES.forEach((role) => {
+    const reference = uploadSareeState.uploadedBaserowFiles[role];
+    if (fields[role] && reference?.name) payload[`field_${fields[role]}`] = [{ name: reference.name }];
+  });
+  return payload;
+}
+
+async function submitBaserowFormRow(form) {
+  const endpoint = uploadSareeState.publicConfig?.form?.endpoints?.submit;
+  if (!endpoint) throw Object.assign(new Error("Baserow Form submission is not configured."), { definitive: true });
+  const timeoutId = setTimeout(() => {
+    uploadSareeState.uploadTimedOut = true;
+    uploadSareeState.uploadAbortController?.abort();
+  }, uploadSareeState.clientTimeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(buildBaserowFormPayload(form)),
+      signal: uploadSareeState.uploadAbortController.signal,
+      credentials: "omit",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(data?.detail || data?.error || `Baserow Form submission failed with ${response.status}.`);
+      error.definitive = response.status >= 400 && response.status < 500;
+      error.status = response.status;
+      throw error;
+    }
+    if (!Number.isInteger(Number(data?.row_id))) {
+      throw new TypeError("Baserow did not return a confirmed row ID.");
+    }
+    return { ...data, rowId: Number(data.row_id) };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function resolveTrackedBaserowSubmission() {
+  const submissionId = uploadSareeState.submissionId;
+  if (!submissionId) return { status: "inconclusive", reason: "SUBMISSION_NOT_TRACKED" };
+  const data = await loadRecentUploadSarees({
+    force: true,
+    preserveDetail: true,
+    silent: true,
+    submissionId,
+  });
+  const result = data?.submissionCheck || { status: "inconclusive", reason: "SUBMISSION_CHECK_UNAVAILABLE" };
+  uploadSareeState.retryCheckRequired = result.status === "inconclusive";
+  return result;
+}
+
+async function removeTrackedBaserowSubmission() {
+  const submissionId = uploadSareeState.submissionId;
+  if (!submissionId) return;
+  try {
+    await uploadApiCall(`${UPLOAD_API.submissions}/${encodeURIComponent(submissionId)}`, { method: "DELETE" });
+  } catch (error) {
+    console.warn("Committed upload tracking cleanup failed", { message: error.message });
+  }
+}
+
 async function submitUploadSaree(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -1567,17 +1775,21 @@ async function submitUploadSaree(event) {
   clearUploadError();
 
   const config = uploadSareeState.publicConfig || {};
-  if (isRunningOnVercelProduction() && (!config.directStorageEnabled || !config.blobConfigured)) {
+  if (!config.providerReady) {
     showUploadToast("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
     setUploadMessage("Large-image storage is not configured on the server. Upload is temporarily unavailable.", true);
     return;
   }
 
-  if (config.directStorageEnabled) {
+  if (config.storageProvider === "baserow_form") {
+    return submitUploadSareeBaserowForm(form);
+  }
+
+  if (config.storageProvider === "vercel_blob" && config.directStorageEnabled) {
     return submitUploadSareeDirect(form);
   }
 
-  return submitUploadSareeLegacy(form);
+  showUploadToast("The selected upload provider is not available.", true);
 }
 
 async function completeUploadSuccess(form, selectedItems) {
@@ -1596,6 +1808,7 @@ async function completeUploadSuccess(form, selectedItems) {
   form.reset();
   clearUploadFilePreviews();
   uploadSareeState.uploadedBlobPaths = [];
+  resetBaserowSubmissionClientState();
   updateUploadSyncTime();
 }
 
@@ -1643,6 +1856,142 @@ async function submitUploadSareeLegacy(form) {
     setUploadControlsDisabled(false);
     if (submitBtn) submitBtn.disabled = false;
     hideUploadProgressAfterDelay();
+  }
+}
+
+async function submitUploadSareeBaserowForm(form) {
+  const submitBtn = document.getElementById("uploadSubmitBtn");
+  let selectedItems = [];
+  let stage = "validating";
+  let completed = false;
+
+  try {
+    selectedItems = validateSelectedUploadFiles();
+    const fingerprint = uploadSubmissionFingerprint(form, selectedItems);
+    if (uploadSareeState.submissionId && uploadSareeState.submissionFingerprint !== fingerprint) {
+      resetBaserowSubmissionClientState();
+    }
+
+    uploadSareeState.isUploading = true;
+    uploadSareeState.uploadCancelled = false;
+    uploadSareeState.uploadTimedOut = false;
+    uploadSareeState.uploadAbortController = new AbortController();
+    uploadSareeState.fileProgress = { saree: 0, blouse: 0, pallu: 0, border: 0 };
+    uploadSareeState.submitting = true;
+    setUploadControlsDisabled(true);
+
+    if (uploadSareeState.retryCheckRequired) {
+      showUploadProgress("Checking whether the previous submission created a row...", 95);
+      const previousResult = await resolveTrackedBaserowSubmission();
+      if (previousResult.status === "found") {
+        completed = true;
+        await completeUploadSuccess(form, selectedItems);
+        return;
+      }
+      if (previousResult.status !== "absent") {
+        throw Object.assign(new Error("The previous result is still unknown. No retry was sent; verify the tracked upload before retrying."), { noRetry: true });
+      }
+      uploadSareeState.retryCheckRequired = false;
+    }
+
+    if (!uploadSareeState.submissionId) {
+      showUploadProgress("Creating a tracked upload session...", 0);
+      await createBaserowSubmissionSession(form, selectedItems, fingerprint);
+    }
+
+    stage = "uploading";
+    const endpoint = uploadSareeState.publicConfig?.form?.endpoints?.uploadFile;
+    if (!endpoint) throw Object.assign(new Error("Baserow Form file upload is not configured."), { definitive: true });
+    const uploadFiles = Object.fromEntries(selectedItems.map((item) => [item.role, item.file]));
+    for (const item of selectedItems) {
+      if (uploadSareeState.uploadCancelled) throw new DOMException("Upload cancelled.", "AbortError");
+      if (uploadSareeState.uploadedBaserowFiles[item.role]?.name) {
+        uploadSareeState.fileProgress[item.role] = 100;
+        continue;
+      }
+      const timeoutId = setTimeout(() => {
+        uploadSareeState.uploadTimedOut = true;
+        uploadSareeState.uploadAbortController?.abort();
+      }, uploadSareeState.clientTimeoutMs);
+      let reference;
+      try {
+        reference = await uploadFileToBaserowForm(
+          item.file,
+          endpoint,
+          uploadSareeState.uploadAbortController.signal,
+          (percentage) => {
+            uploadSareeState.fileProgress[item.role] = percentage;
+            const totalPercent = calculateTotalUploadProgress(uploadFiles, uploadSareeState.fileProgress);
+            showUploadProgress(`Uploading ${item.label}: ${percentage}%`, totalPercent);
+          },
+        );
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      await trackBaserowUploadedFile(uploadSareeState.submissionId, item.role, reference.name);
+      uploadSareeState.uploadedBaserowFiles[item.role] = reference;
+      uploadSareeState.fileProgress[item.role] = 100;
+    }
+
+    stage = "submitting";
+    showUploadProgress("Creating the Baserow row...", 96);
+    await setTrackedBaserowSubmissionStatus("submitting");
+    await submitBaserowFormRow(form);
+    await removeTrackedBaserowSubmission();
+    completed = true;
+    await completeUploadSuccess(form, selectedItems);
+  } catch (error) {
+    if (stage === "submitting" && !error?.definitive) {
+      uploadSareeState.retryCheckRequired = true;
+      try {
+        await setTrackedBaserowSubmissionStatus("unknown");
+      } catch (trackingError) {
+        console.warn("Unable to mark ambiguous Baserow submission", { message: trackingError.message });
+      }
+      showUploadProgress("Confirming the submission result...", 97);
+      try {
+        const result = await resolveTrackedBaserowSubmission();
+        if (result.status === "found") {
+          completed = true;
+          await completeUploadSuccess(form, selectedItems);
+          return;
+        }
+        if (result.status === "absent") {
+          try {
+            await setTrackedBaserowSubmissionStatus("retry_permitted");
+          } catch (trackingError) {
+            console.warn("Unable to mark Baserow retry permission", { message: trackingError.message });
+          }
+          setUploadMessage("No matching row was found. The uploaded files were retained and a retry is now permitted.", true);
+          showUploadToast("No matching row was found. Retry is permitted.", true);
+          return;
+        }
+      } catch (verificationError) {
+        console.warn("Ambiguous Baserow submission verification failed", { message: verificationError.message });
+      }
+      uploadSareeState.retryCheckRequired = true;
+      setUploadMessage("The submission result is unknown. No automatic retry was sent. Use Upload again to re-check before any retry.", true);
+      showUploadToast("Submission result unknown; no retry was sent.", true);
+      return;
+    }
+
+    if (uploadSareeState.uploadTimedOut) {
+      setUploadMessage("The file upload timed out. Uploaded file references were retained for a safe retry.", true);
+      showUploadToast("The file upload timed out.", true);
+    } else if (error?.name === "AbortError" || uploadSareeState.uploadCancelled) {
+      setUploadMessage("Upload cancelled. Completed file uploads remain tracked for cleanup or retry.", true);
+      showUploadToast("Upload cancelled.", true);
+    } else {
+      setUploadMessage(error.message || "Upload failed.", true);
+      showUploadToast(error.message || "Upload failed.", true);
+    }
+  } finally {
+    uploadSareeState.isUploading = false;
+    uploadSareeState.submitting = false;
+    uploadSareeState.uploadAbortController = null;
+    setUploadControlsDisabled(false);
+    if (submitBtn) submitBtn.disabled = false;
+    if (!completed) hideUploadProgressAfterDelay();
   }
 }
 
@@ -1954,6 +2303,7 @@ function stopUploadAutoSync() {
 
 function clearUploadRoleFile(role, { revokePreview = true, render = true, clearMessage = true } = {}) {
   if (!UPLOAD_REFERENCE_ROLES.includes(role)) return;
+  resetBaserowSubmissionClientState();
   uploadSareeState.conversionIds[role] += 1;
   setUploadRoleConverting(role, false);
   const previewUrl = uploadSareeState.previewUrls?.[role];
@@ -2121,6 +2471,7 @@ async function setUploadRoleFile(role, file) {
   const config = getUploadRoleConfig(role);
   if (!config) throw new Error("Invalid reference image role.");
   validateUploadImageFile(file, config.label);
+  resetBaserowSubmissionClientState();
 
   const conversionId = uploadSareeState.conversionIds[role] + 1;
   uploadSareeState.conversionIds[role] = conversionId;
@@ -2130,7 +2481,7 @@ async function setUploadRoleFile(role, file) {
   uploadSareeState[`${role}File`] = null;
   uploadSareeState.fileProgress[role] = 0;
 
-  if (!isHeicUploadFile(file)) {
+  if (!isHeicUploadFile(file) || uploadSareeState.storageProvider === "baserow_form") {
     setUploadRoleConverting(role, false);
     setPreparedUploadRoleFile(role, file, file, false, conversionId);
     clearUploadError();
@@ -2258,6 +2609,7 @@ function renderUploadRolePreview(role) {
 
   if (!(file instanceof File) || !(originalFile instanceof File) || !url) return;
   const uploadSizeMb = (file.size / (1024 * 1024)).toFixed(2);
+  const preserveOriginalHeic = uploadSareeState.storageProvider === "baserow_form" && isHeicUploadFile(file);
   const dimensions = selection.dimensions;
   const dimensionText = dimensions?.width && dimensions?.height
     ? `<span>Full resolution: ${dimensions.width} x ${dimensions.height}px</span>`
@@ -2270,10 +2622,13 @@ function renderUploadRolePreview(role) {
     : `<span>${uploadSizeMb} MB</span>`;
   preview.innerHTML = `
     <div class="upload-selected-file">
-      ${renderUploadZoomableImage(url, url, file.name)}
+      ${preserveOriginalHeic
+        ? `<div class="upload-file-error-icon" aria-hidden="true">HEIC</div>`
+        : renderUploadZoomableImage(url, url, file.name)}
       <div>
         <strong>${uploadEscapeHtml(originalFile.name)}</strong>
         ${fileDetails}
+        ${preserveOriginalHeic ? "<span>Original HEIC/HEIF file will be uploaded without conversion.</span>" : ""}
       </div>
       <button class="upload-icon-btn" type="button">Remove</button>
     </div>

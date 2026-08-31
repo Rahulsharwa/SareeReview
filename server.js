@@ -56,6 +56,20 @@ const SOCIAL_AUTH_COOKIE = "jsh_social_review";
 const UPLOAD_BASEROW_API_URL = process.env.UPLOAD_BASEROW_API_URL || BASEROW_BASE_URL;
 const UPLOAD_BASEROW_TOKEN = process.env.UPLOAD_BASEROW_TOKEN || "";
 const UPLOAD_BASEROW_TABLE_ID = process.env.UPLOAD_BASEROW_TABLE_ID || "1076991";
+const UPLOAD_STORAGE_PROVIDERS = new Set(["vercel_blob", "baserow_form", "own_server"]);
+const UPLOAD_STORAGE_PROVIDER = String(process.env.UPLOAD_STORAGE_PROVIDER || "vercel_blob").trim().toLowerCase();
+if (!UPLOAD_STORAGE_PROVIDERS.has(UPLOAD_STORAGE_PROVIDER)) {
+  throw new Error("UPLOAD_STORAGE_PROVIDER must be vercel_blob, baserow_form, or own_server.");
+}
+const UPLOAD_BASEROW_FORM_SLUG = String(process.env.UPLOAD_BASEROW_FORM_SLUG || "").trim();
+const UPLOAD_BASEROW_FORM_START_OPTION_ID = 6813975;
+const UPLOAD_BASEROW_FORM_METADATA_TTL_MS = 60 * 1000;
+const UPLOAD_UNCOMMITTED_TTL_SECONDS = 90 * 24 * 60 * 60;
+const UPLOAD_UNCOMMITTED_MAX_RECORDS = 500;
+const UPLOAD_UNCOMMITTED_PREFIX = `${CACHE_PREFIX}upload-saree:uncommitted:v1:`;
+const UPLOAD_STORAGE_VERIFIED_AT = String(process.env.UPLOAD_BASEROW_STORAGE_VERIFIED_AT || "").trim();
+const UPLOAD_STORAGE_USED_BYTES = Number(process.env.UPLOAD_BASEROW_STORAGE_USED_BYTES || 0);
+const UPLOAD_STORAGE_LIMIT_BYTES = Number(process.env.UPLOAD_BASEROW_STORAGE_LIMIT_BYTES || 0);
 const MAX_UPLOAD_SIZE_MB = Math.max(1, Math.min(Number(process.env.MAX_UPLOAD_SIZE_MB || 50), 50));
 const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 const MAX_HEIC_DECODE_PIXELS = Math.max(
@@ -94,6 +108,23 @@ const UPLOAD_IMAGE_MIME_TYPES = new Set(
     .filter(Boolean)
 );
 const UPLOAD_ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const UPLOAD_BASEROW_FORM_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+const UPLOAD_BASEROW_FORM_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"]);
+const UPLOAD_BASEROW_FORM_MIME_BY_EXTENSION = new Map([
+  [".jpg", new Set(["image/jpeg", "image/jpg"])],
+  [".jpeg", new Set(["image/jpeg", "image/jpg"])],
+  [".png", new Set(["image/png"])],
+  [".webp", new Set(["image/webp"])],
+  [".heic", new Set(["image/heic", "image/heif"])],
+  [".heif", new Set(["image/heic", "image/heif"])],
+]);
 const UPLOAD_FIELDS = {
   productTitle: process.env.UPLOAD_FIELD_PRODUCT_TITLE || "9535465",
   productCode: process.env.UPLOAD_FIELD_PRODUCT_CODE || "9535466",
@@ -120,6 +151,32 @@ const UPLOAD_GENERATION_STATUS = {
   draft: process.env.UPLOAD_GENERATION_STATUS_DRAFT || "Draft",
   failed: process.env.UPLOAD_GENERATION_STATUS_FAILED || "Failed",
 };
+const UPLOAD_BASEROW_FORM_FIELD_IDS = Object.freeze({
+  productTitle: 9535465,
+  productCode: 9535466,
+  category: 9535467,
+  price: 9535468,
+  saree: 9535469,
+  blouse: 9535470,
+  generationStatus: 9535471,
+  commentNotes: 9535472,
+  pallu: 9626173,
+  border: 9626175,
+  descriptions: 9626178,
+});
+const UPLOAD_BASEROW_FORM_FIELD_TYPES = new Map([
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.productTitle, "text"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.productCode, "text"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.category, "text"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.price, "number"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.saree, "file"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.blouse, "file"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.generationStatus, "single_select"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.commentNotes, "long_text"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.pallu, "file"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.border, "file"],
+  [UPLOAD_BASEROW_FORM_FIELD_IDS.descriptions, "long_text"],
+]);
 const UPLOAD_ASSET_CATEGORY_GROUPS = [
   {
     label: "Saree Collections",
@@ -502,7 +559,13 @@ async function initializeCache() {
 
   if ((CACHE_PROVIDER === "redis" || (!CACHE_PROVIDER && process.env.REDIS_URL)) && process.env.REDIS_URL) {
     try {
-      redisCloudClient = createClient({ url: process.env.REDIS_URL });
+      redisCloudClient = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          connectTimeout: 5000,
+          reconnectStrategy: false,
+        },
+      });
       redisCloudClient.on("error", (error) => {
         cacheStats.errors += 1;
         cacheConnected = false;
@@ -1809,18 +1872,246 @@ function uploadStatusPayload(status, feedback = "") {
   return payload;
 }
 
-function getUploadConfigStatus() {
+let uploadFormMetadataCache = null;
+
+function getUploadFormEndpoints() {
+  if (!UPLOAD_BASEROW_FORM_SLUG || !/^[A-Za-z0-9_-]{20,200}$/.test(UPLOAD_BASEROW_FORM_SLUG)) return null;
+  const root = `${UPLOAD_BASEROW_API_URL}/api/database/views/form/${UPLOAD_BASEROW_FORM_SLUG}`;
+  return {
+    metadata: `${root}/submit/`,
+    uploadFile: `${root}/upload-file/`,
+    submit: `${root}/submit/`,
+  };
+}
+
+function validateUploadFormMetadata(metadata) {
+  const fields = Array.isArray(metadata?.fields) ? metadata.fields : [];
+  const expectedIds = Object.values(UPLOAD_BASEROW_FORM_FIELD_IDS).map(Number).sort((a, b) => a - b);
+  const activeIds = fields.map((item) => Number(item?.field?.id)).filter(Number.isInteger).sort((a, b) => a - b);
+  const exactFields = expectedIds.length === activeIds.length
+    && expectedIds.every((fieldId, index) => fieldId === activeIds[index]);
+  const fieldTypes = fields.length === UPLOAD_BASEROW_FORM_FIELD_TYPES.size
+    && fields.every((item) => UPLOAD_BASEROW_FORM_FIELD_TYPES.get(Number(item?.field?.id)) === item?.field?.type);
+  const sareeField = fields.find((item) => Number(item?.field?.id) === UPLOAD_BASEROW_FORM_FIELD_IDS.saree);
+  const statusField = fields.find((item) => Number(item?.field?.id) === UPLOAD_BASEROW_FORM_FIELD_IDS.generationStatus);
+  const statusOptions = Array.isArray(statusField?.field?.select_options) ? statusField.field.select_options : [];
+  const startOnly = statusOptions.length === 1
+    && Number(statusOptions[0]?.id) === UPLOAD_BASEROW_FORM_START_OPTION_ID
+    && String(statusOptions[0]?.value || "").trim() === UPLOAD_GENERATION_STATUS.start;
+  const checks = {
+    exactFields,
+    fieldTypes,
+    sareeRequired: sareeField?.required === true,
+    generationStatusRequired: statusField?.required === true,
+    generationStatusField: Number(statusField?.field?.id) === UPLOAD_BASEROW_FORM_FIELD_IDS.generationStatus,
+    startOptionId: startOnly ? UPLOAD_BASEROW_FORM_START_OPTION_ID : null,
+    startOnly,
+  };
+  return { ready: Object.values(checks).every(Boolean), checks };
+}
+
+async function getUploadFormMetadataStatus({ refresh = false } = {}) {
+  const endpoints = getUploadFormEndpoints();
+  if (!endpoints) {
+    return { configured: false, reachable: false, ready: false, checks: {}, endpoints: null };
+  }
+  if (!refresh && uploadFormMetadataCache?.expiresAt > Date.now()) return uploadFormMetadataCache.value;
+
+  let value;
+  try {
+    const response = await fetch(endpoints.metadata, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const metadata = response.ok ? await response.json() : null;
+    const validation = response.ok ? validateUploadFormMetadata(metadata) : { ready: false, checks: {} };
+    value = {
+      configured: true,
+      reachable: response.ok,
+      ready: response.ok && validation.ready,
+      checks: validation.checks,
+      endpoints,
+      status: response.status,
+    };
+  } catch (error) {
+    value = {
+      configured: true,
+      reachable: false,
+      ready: false,
+      checks: {},
+      endpoints,
+      message: safeUploadDiagnosticMessage(error),
+    };
+  }
+  uploadFormMetadataCache = { value, expiresAt: Date.now() + UPLOAD_BASEROW_FORM_METADATA_TTL_MS };
+  return value;
+}
+
+function getUploadStorageGateStatus() {
+  const verifiedAt = Date.parse(UPLOAD_STORAGE_VERIFIED_AT);
+  const valuesValid = Number.isFinite(UPLOAD_STORAGE_USED_BYTES)
+    && Number.isFinite(UPLOAD_STORAGE_LIMIT_BYTES)
+    && UPLOAD_STORAGE_USED_BYTES >= 0
+    && UPLOAD_STORAGE_LIMIT_BYTES > 0
+    && UPLOAD_STORAGE_USED_BYTES <= UPLOAD_STORAGE_LIMIT_BYTES;
+  const verifiedAtValid = Number.isFinite(verifiedAt) && verifiedAt <= Date.now() + 5 * 60 * 1000;
+  const ratio = valuesValid ? UPLOAD_STORAGE_USED_BYTES / UPLOAD_STORAGE_LIMIT_BYTES : null;
+  return {
+    verified: valuesValid && verifiedAtValid,
+    belowThreshold: valuesValid && ratio < 0.9,
+    usedBytes: valuesValid ? UPLOAD_STORAGE_USED_BYTES : null,
+    limitBytes: valuesValid ? UPLOAD_STORAGE_LIMIT_BYTES : null,
+    usagePercent: valuesValid ? Math.round(ratio * 10000) / 100 : null,
+    verifiedAt: verifiedAtValid ? new Date(verifiedAt).toISOString() : null,
+    thresholdPercent: 90,
+  };
+}
+
+function durableUploadTrackingReady() {
+  return activeCacheProvider === "redis" && cacheConnected && Boolean(redisCloudClient?.isReady);
+}
+
+function uploadSubmissionKey(submissionId) {
+  return `${UPLOAD_UNCOMMITTED_PREFIX}${submissionId}`;
+}
+
+function validateUploadSubmissionId(value) {
+  const submissionId = String(value || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)
+    ? submissionId
+    : "";
+}
+
+async function getUploadSubmission(submissionId) {
+  if (!durableUploadTrackingReady()) return null;
+  const raw = await redisCloudClient.get(uploadSubmissionKey(submissionId));
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function saveUploadSubmission(record) {
+  if (!durableUploadTrackingReady()) {
+    const error = new Error("Durable Redis submission tracking is unavailable.");
+    error.status = 503;
+    error.code = "UPLOAD_TRACKING_UNAVAILABLE";
+    throw error;
+  }
+  const updated = { ...record, updatedAt: new Date().toISOString() };
+  await redisCloudClient.setEx(uploadSubmissionKey(updated.submissionId), UPLOAD_UNCOMMITTED_TTL_SECONDS, JSON.stringify(updated));
+  return updated;
+}
+
+async function deleteUploadSubmission(submissionId) {
+  if (!durableUploadTrackingReady()) return false;
+  return (await redisCloudClient.del(uploadSubmissionKey(submissionId))) > 0;
+}
+
+async function listUploadSubmissions({ limit = UPLOAD_UNCOMMITTED_MAX_RECORDS } = {}) {
+  if (!durableUploadTrackingReady()) return [];
+  let cursor = "0";
+  const keys = [];
+  do {
+    const result = await redisCloudClient.scan(cursor, { MATCH: `${UPLOAD_UNCOMMITTED_PREFIX}*`, COUNT: 100 });
+    cursor = String(result.cursor);
+    keys.push(...result.keys);
+  } while (cursor !== "0");
+  if (!keys.length) return [];
+  const values = await redisCloudClient.mGet(keys);
+  const records = values
+    .map((value) => {
+      try { return value ? JSON.parse(value) : null; } catch { return null; }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return Number.isFinite(limit) ? records.slice(0, limit) : records;
+}
+
+async function pruneUploadSubmissions() {
+  const records = await listUploadSubmissions({ limit: null });
+  if (records.length <= UPLOAD_UNCOMMITTED_MAX_RECORDS) return;
+  await Promise.all(records.slice(UPLOAD_UNCOMMITTED_MAX_RECORDS).map((record) => deleteUploadSubmission(record.submissionId)));
+}
+
+async function getLatestUploadRows() {
+  const pageSize = 200;
+  const firstParams = new URLSearchParams({ user_field_names: "false", size: String(pageSize), page: "1" });
+  const first = await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${firstParams.toString()}`);
+  const count = Math.max(0, Number(first?.count || 0));
+  const lastPage = Math.max(1, Math.ceil(count / pageSize));
+  const pages = new Set([lastPage, Math.max(1, lastPage - 1)]);
+  const responses = [];
+  for (const page of pages) {
+    if (page === 1) {
+      responses.push(first);
+      continue;
+    }
+    const params = new URLSearchParams({ user_field_names: "false", size: String(pageSize), page: String(page) });
+    responses.push(await uploadBaserowFetch(`/api/database/rows/table/${UPLOAD_BASEROW_TABLE_ID}/?${params.toString()}`));
+  }
+  const byId = new Map();
+  responses.forEach((response) => {
+    (Array.isArray(response?.results) ? response.results : []).forEach((row) => byId.set(Number(row.id), row));
+  });
+  return {
+    count,
+    rows: Array.from(byId.values()).sort((a, b) => Number(b.id || 0) - Number(a.id || 0)),
+  };
+}
+
+async function getLatestUploadRowId() {
+  const { rows } = await getLatestUploadRows();
+  return rows.reduce((maximum, row) => Math.max(maximum, Number(row.id || 0)), 0);
+}
+
+function normalizedUploadMatchText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function findUploadSubmissionMatch(record) {
+  const createdAt = Date.parse(record?.createdAt);
+  if (!Number.isFinite(createdAt) || Date.now() - createdAt > UPLOAD_UNCOMMITTED_TTL_SECONDS * 1000) {
+    return { status: "inconclusive", reason: "SUBMISSION_TIME_INVALID" };
+  }
+  const sareeName = String(record?.files?.saree?.baserowName || "").trim();
+  if (!sareeName) return { status: "inconclusive", reason: "SAREE_FILE_NOT_TRACKED" };
+  const { count, rows } = await getLatestUploadRows();
+  const baselineRowId = Number(record.baselineRowId || 0);
+  const newerRows = rows.filter((row) => Number(row.id) > baselineRowId);
+  const matchingRow = newerRows.find((row) => {
+    const files = row[uploadFieldKey("sareeImage")];
+    const hasSaree = Array.isArray(files) && files.some((file) => String(file?.name || "") === sareeName);
+    return hasSaree
+      && normalizedUploadMatchText(row[uploadFieldKey("productCode")]) === normalizedUploadMatchText(record.productCode)
+      && normalizedUploadMatchText(row[uploadFieldKey("productTitle")]) === normalizedUploadMatchText(record.productTitle);
+  });
+  if (matchingRow) return { status: "found", rowId: Number(matchingRow.id), submissionCreatedAt: record.createdAt };
+  const reachedBaseline = count <= rows.length || rows.some((row) => Number(row.id) <= baselineRowId);
+  return reachedBaseline
+    ? { status: "absent", checkedAt: new Date().toISOString(), submissionCreatedAt: record.createdAt }
+    : { status: "inconclusive", reason: "RECENT_ROW_WINDOW_EXCEEDED" };
+}
+
+async function getUploadConfigStatus({ refresh = false } = {}) {
   const required = ["UPLOAD_BASEROW_TOKEN", "UPLOAD_BASEROW_TABLE_ID"];
   const missing = required.filter((key) => !process.env[key] && !(key === "UPLOAD_BASEROW_TABLE_ID" && UPLOAD_BASEROW_TABLE_ID));
-  if (UPLOAD_DIRECT_STORAGE_ENABLED && !UPLOAD_BLOB_CONFIGURED) {
+  if (UPLOAD_STORAGE_PROVIDER === "vercel_blob" && UPLOAD_DIRECT_STORAGE_ENABLED && !UPLOAD_BLOB_CONFIGURED) {
     missing.push("BLOB_READ_WRITE_TOKEN");
   }
   const fieldValues = Object.values(UPLOAD_FIELDS);
   const fieldsConfigured = fieldValues.every((value) => /^\d+$/.test(String(value || "")));
-  const ok = missing.length === 0 && fieldsConfigured;
+  const form = await getUploadFormMetadataStatus({ refresh });
+  const storage = getUploadStorageGateStatus();
+  const tracking = { provider: cacheProvider(), connected: cacheConnected, durable: durableUploadTrackingReady() };
+  const providerReady = UPLOAD_STORAGE_PROVIDER === "vercel_blob"
+    ? UPLOAD_DIRECT_STORAGE_ENABLED && UPLOAD_BLOB_CONFIGURED
+    : UPLOAD_STORAGE_PROVIDER === "baserow_form"
+      ? form.ready && tracking.durable && storage.verified && storage.belowThreshold
+      : false;
+  const ok = missing.length === 0 && fieldsConfigured && providerReady;
   return {
     ok,
     configured: ok,
+    storageProvider: UPLOAD_STORAGE_PROVIDER,
+    providerReady,
     tableId: Number(UPLOAD_BASEROW_TABLE_ID),
     fieldsConfigured,
     missing,
@@ -1829,10 +2120,10 @@ function getUploadConfigStatus() {
     maxHeicDecodePixels: MAX_HEIC_DECODE_PIXELS,
     maxFiles: UPLOAD_MAX_FILES,
     maxUploadFiles: UPLOAD_MAX_FILES,
-    allowedMimeTypes: Array.from(UPLOAD_IMAGE_MIME_TYPES),
+    allowedMimeTypes: Array.from(UPLOAD_STORAGE_PROVIDER === "baserow_form" ? UPLOAD_BASEROW_FORM_MIME_TYPES : UPLOAD_IMAGE_MIME_TYPES),
     categoryGroups: UPLOAD_ASSET_CATEGORY_GROUPS,
     categoryCount: UPLOAD_ASSET_CATEGORIES.length,
-    directStorageEnabled: UPLOAD_DIRECT_STORAGE_ENABLED,
+    directStorageEnabled: UPLOAD_STORAGE_PROVIDER === "vercel_blob" && UPLOAD_DIRECT_STORAGE_ENABLED,
     blobConfigured: UPLOAD_BLOB_CONFIGURED,
     blob: {
       configured: UPLOAD_BLOB_CONFIGURED,
@@ -1841,7 +2132,22 @@ function getUploadConfigStatus() {
       uploadMode: "client-direct",
       access: UPLOAD_BLOB_ACCESS,
       maxUploadSizeMb: MAX_UPLOAD_SIZE_MB,
+      enabled: UPLOAD_STORAGE_PROVIDER === "vercel_blob",
     },
+    form: {
+      configured: form.configured,
+      reachable: form.reachable,
+      ready: form.ready,
+      uploadMode: "browser-direct",
+      checks: form.checks,
+      endpoints: form.endpoints,
+      startOptionId: UPLOAD_BASEROW_FORM_START_OPTION_ID,
+      fields: UPLOAD_BASEROW_FORM_FIELD_IDS,
+      maxUploadSizeMb: MAX_UPLOAD_SIZE_MB,
+      enabled: UPLOAD_STORAGE_PROVIDER === "baserow_form",
+    },
+    tracking,
+    storage: getUploadStorageGateStatus(),
     referenceFields: {
       saree: Boolean(UPLOAD_FIELDS.sareeImage),
       blouse: Boolean(UPLOAD_FIELDS.blouseImage),
@@ -1850,7 +2156,7 @@ function getUploadConfigStatus() {
       descriptions: Boolean(UPLOAD_FIELDS.descriptions),
     },
     clientTimeoutMs: UPLOAD_CLIENT_TIMEOUT_MS,
-    ...(!UPLOAD_BLOB_CONFIGURED && UPLOAD_DIRECT_STORAGE_ENABLED
+    ...(!providerReady
       ? { message: "Direct upload storage is not configured." }
       : {}),
   };
@@ -3245,21 +3551,155 @@ app.post("/api/reject-content", requireSocialReviewAuth, async (req, res) => {
   }
 });
 
-app.get("/api/upload-saree/status", requireSocialReviewAuth, (req, res) => {
-  const status = getUploadConfigStatus();
-  res.json(status);
+app.get("/api/upload-saree/status", requireSocialReviewAuth, async (req, res) => {
+  try {
+    res.json(await getUploadConfigStatus({ refresh: String(req.query.refresh || "") === "1" }));
+  } catch (error) {
+    res.status(500).json({ ok: false, configured: false, message: "Unable to verify Upload Saree configuration." });
+  }
 });
 
 app.get("/api/upload-saree/recent", requireSocialReviewAuth, async (req, res) => {
   try {
     const refresh = String(req.query.refresh || "") === "1";
-    res.json(await fetchRecentUploadSarees({ refresh }));
+    const payload = await fetchRecentUploadSarees({ refresh });
+    const submissionId = validateUploadSubmissionId(req.query.submissionId);
+    if (!submissionId) return res.json(payload);
+    const record = await getUploadSubmission(submissionId);
+    if (!record) {
+      return res.json({ ...payload, submissionCheck: { status: "inconclusive", reason: "SUBMISSION_NOT_TRACKED" } });
+    }
+    const submissionCheck = await findUploadSubmissionMatch(record);
+    if (submissionCheck.status === "found") {
+      await deleteUploadSubmission(submissionId);
+    } else {
+      record.status = submissionCheck.status === "absent" ? "retry_permitted" : "unknown";
+      record.lastCheckedAt = new Date().toISOString();
+      if (record.status === "unknown" && !record.unknownAt) record.unknownAt = record.lastCheckedAt;
+      await saveUploadSubmission(record);
+    }
+    res.json({ ...payload, submissionCheck });
   } catch (error) {
     res.status(error.status || 500).json({
       ok: false,
       error: error.message === "Upload Baserow token is not configured." ? error.message : "Unable to load uploaded sarees.",
     });
   }
+});
+
+app.post("/api/upload-saree/submissions", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
+  try {
+    const config = await getUploadConfigStatus({ refresh: true });
+    if (UPLOAD_STORAGE_PROVIDER !== "baserow_form" || !config.providerReady) {
+      return res.status(503).json({ ok: false, code: "BASEROW_FORM_NOT_READY", message: "Direct Baserow Form upload is not ready." });
+    }
+    const inputFiles = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (!inputFiles.length || inputFiles.length > UPLOAD_MAX_FILES) {
+      return res.status(400).json({ ok: false, code: "INVALID_FILE_COUNT", message: `Select 1 to ${UPLOAD_MAX_FILES} images.` });
+    }
+    const files = {};
+    for (const file of inputFiles) {
+      const role = String(file?.role || "").trim();
+      const originalName = path.basename(String(file?.name || "").trim()).slice(0, 255);
+      const mimeType = String(file?.mimeType || "").trim().toLowerCase();
+      const size = Number(file?.size || 0);
+      const extension = path.extname(originalName).toLowerCase();
+      const matchingMimeTypes = UPLOAD_BASEROW_FORM_MIME_BY_EXTENSION.get(extension);
+      if (!ALLOWED_UPLOAD_ROLES.has(role) || files[role]) throw Object.assign(new Error("Invalid image role."), { status: 400 });
+      if (
+        !originalName
+        || !UPLOAD_BASEROW_FORM_EXTENSIONS.has(extension)
+        || !UPLOAD_BASEROW_FORM_MIME_TYPES.has(mimeType)
+        || !matchingMimeTypes?.has(mimeType)
+      ) {
+        throw Object.assign(new Error("Only JPG, PNG, WEBP, HEIC, and HEIF images are allowed."), { status: 415 });
+      }
+      if (!Number.isFinite(size) || size <= 0 || size > MAX_UPLOAD_SIZE_BYTES) {
+        throw Object.assign(new Error(`Each image must be ${MAX_UPLOAD_SIZE_MB}MB or smaller.`), { status: size > MAX_UPLOAD_SIZE_BYTES ? 413 : 400 });
+      }
+      files[role] = { role, originalName, mimeType, size, baserowName: null, uploadedAt: null };
+    }
+    if (!files.saree) return res.status(400).json({ ok: false, code: "SAREE_IMAGE_REQUIRED", message: "Please upload Saree Image." });
+
+    const submissionId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const record = await saveUploadSubmission({
+      submissionId,
+      status: "uploading",
+      createdAt,
+      baselineRowId: await getLatestUploadRowId(),
+      productTitle: String(req.body?.productTitle || "").trim().slice(0, 500),
+      productCode: String(req.body?.productCode || "").trim().slice(0, 200),
+      category: validateUploadCategory(req.body?.category),
+      files,
+    });
+    await pruneUploadSubmissions();
+    res.json({ ok: true, submissionId, createdAt: record.createdAt, baselineRowId: record.baselineRowId });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      ok: false,
+      code: error.code || "SUBMISSION_SESSION_FAILED",
+      message: error.status && error.status < 500 ? error.message : "Unable to create a tracked upload session.",
+    });
+  }
+});
+
+app.patch("/api/upload-saree/submissions/:submissionId/files/:role", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const submissionId = validateUploadSubmissionId(req.params.submissionId);
+    const role = String(req.params.role || "").trim();
+    const baserowName = String(req.body?.name || "").trim();
+    if (!submissionId || !ALLOWED_UPLOAD_ROLES.has(role) || !/^[A-Za-z0-9._-]{1,255}$/.test(baserowName)) {
+      return res.status(400).json({ ok: false, code: "INVALID_UPLOAD_REFERENCE", message: "Invalid uploaded file reference." });
+    }
+    const record = await getUploadSubmission(submissionId);
+    if (!record?.files?.[role]) return res.status(404).json({ ok: false, code: "SUBMISSION_NOT_FOUND", message: "Tracked upload session was not found." });
+    record.files[role] = { ...record.files[role], baserowName, uploadedAt: new Date().toISOString() };
+    record.status = "uploading";
+    await saveUploadSubmission(record);
+    res.json({ ok: true, role, name: baserowName });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, code: error.code || "UPLOAD_REFERENCE_TRACKING_FAILED", message: "Unable to track the uploaded file." });
+  }
+});
+
+app.patch("/api/upload-saree/submissions/:submissionId", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const submissionId = validateUploadSubmissionId(req.params.submissionId);
+    const status = String(req.body?.status || "").trim();
+    if (!submissionId || !new Set(["uploading", "submitting", "unknown", "retry_permitted"]).has(status)) {
+      return res.status(400).json({ ok: false, code: "INVALID_SUBMISSION_STATUS", message: "Invalid tracked submission status." });
+    }
+    const record = await getUploadSubmission(submissionId);
+    if (!record) return res.status(404).json({ ok: false, code: "SUBMISSION_NOT_FOUND", message: "Tracked upload session was not found." });
+    record.status = status;
+    if (status === "unknown" && !record.unknownAt) record.unknownAt = new Date().toISOString();
+    const updated = await saveUploadSubmission(record);
+    res.json({ ok: true, submissionId, status: updated.status });
+  } catch (error) {
+    res.status(error.status || 500).json({ ok: false, code: error.code || "SUBMISSION_STATUS_FAILED", message: "Unable to update the tracked submission." });
+  }
+});
+
+app.delete("/api/upload-saree/submissions/:submissionId", requireSocialReviewAuth, async (req, res) => {
+  const submissionId = validateUploadSubmissionId(req.params.submissionId);
+  if (!submissionId) return res.status(400).json({ ok: false, code: "INVALID_SUBMISSION_ID", message: "Invalid submission ID." });
+  res.json({ ok: true, removed: await deleteUploadSubmission(submissionId) });
+});
+
+app.get("/api/upload-saree/uncommitted", requireSocialReviewAuth, async (req, res) => {
+  try {
+    const records = await listUploadSubmissions();
+    res.json({ ok: true, durable: durableUploadTrackingReady(), count: records.length, records });
+  } catch {
+    res.status(503).json({ ok: false, durable: false, count: 0, records: [], message: "Unable to load uncommitted uploads." });
+  }
+});
+
+app.post("/api/upload-saree/uncommitted/:submissionId/resolve", requireSocialReviewAuth, async (req, res) => {
+  const submissionId = validateUploadSubmissionId(req.params.submissionId);
+  if (!submissionId) return res.status(400).json({ ok: false, code: "INVALID_SUBMISSION_ID", message: "Invalid submission ID." });
+  res.json({ ok: true, removed: await deleteUploadSubmission(submissionId) });
 });
 
 app.patch("/api/upload-saree/:rowId/quantity", requireSocialReviewAuth, async (req, res) => {
@@ -3276,6 +3716,9 @@ app.patch("/api/upload-saree/:rowId/quantity", requireSocialReviewAuth, async (r
 
 app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
   try {
+    if (UPLOAD_STORAGE_PROVIDER !== "vercel_blob") {
+      return res.status(409).json({ ok: false, code: "PROVIDER_DISABLED", message: "Vercel Blob upload is disabled for the active provider." });
+    }
     if (!UPLOAD_DIRECT_STORAGE_ENABLED) {
       return res.status(400).json({ ok: false, code: "DIRECT_UPLOAD_DISABLED", message: "Direct storage upload is disabled." });
     }
@@ -3373,6 +3816,9 @@ app.post("/api/upload-saree/blob-upload", requireSocialReviewAuth, uploadRateLim
 app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit, async (req, res) => {
   const stagedPathnames = [];
   try {
+    if (UPLOAD_STORAGE_PROVIDER !== "vercel_blob") {
+      return res.status(409).json({ ok: false, code: "PROVIDER_DISABLED", message: "Blob finalization is disabled for the active provider." });
+    }
     const category = validateUploadCategory(req.body?.category);
     const files = req.body?.files && typeof req.body.files === "object" && !Array.isArray(req.body.files)
       ? req.body.files
@@ -3478,6 +3924,9 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
 
 app.post("/api/upload-saree/cleanup-upload", requireSocialReviewAuth, async (req, res) => {
   try {
+    if (UPLOAD_STORAGE_PROVIDER !== "vercel_blob") {
+      return res.status(409).json({ ok: false, code: "PROVIDER_DISABLED", message: "Blob cleanup is disabled for the active provider." });
+    }
     const pathnames = Array.isArray(req.body?.pathnames) ? req.body.pathnames : [];
     if (pathnames.length > UPLOAD_MAX_FILES) {
       return res.status(400).json({
@@ -3495,6 +3944,9 @@ app.post("/api/upload-saree/cleanup-upload", requireSocialReviewAuth, async (req
 });
 
 app.post("/api/upload-saree", requireSocialReviewAuth, (req, res) => {
+  if (UPLOAD_STORAGE_PROVIDER !== "vercel_blob") {
+    return res.status(409).json({ ok: false, code: "PROVIDER_DISABLED", message: "Legacy server upload is disabled for the active provider." });
+  }
   if (process.env.VERCEL) {
     return res.status(409).json({
       ok: false,
