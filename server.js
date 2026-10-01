@@ -199,6 +199,10 @@ const UPLOAD_ASSET_CATEGORY_GROUPS = [
       "Linen & Kota Silk Sarees",
       "Art Silk Sarees",
       "Bandhani Silk Saree",
+      "Mysore Crepe Sarees",
+      "Fancy Sarees",
+      "Silk Pavada",
+      "Custom",
     ],
   },
   {
@@ -3841,11 +3845,16 @@ app.post("/api/upload-saree/finalize", requireSocialReviewAuth, uploadRateLimit,
       });
     }
 
+    // Finalize owns every valid staged pathname before any Baserow import starts.
+    selectedFileEntries.forEach(([role, file]) => {
+      const pathname = validateUploadBlobPathname(file.pathname, role);
+      if (pathname) stagedPathnames.push(pathname);
+    });
+
     const verifiedFiles = {};
     for (const role of ALLOWED_UPLOAD_ROLES) {
       if (!files[role]) continue;
       const descriptor = validateUploadFileDescriptor(files[role], role);
-      stagedPathnames.push(descriptor.pathname);
       const blobInfo = await headBlob(descriptor.pathname);
       if (blobInfo.pathname !== descriptor.pathname || blobInfo.url !== descriptor.url) {
         const error = new Error("Upload storage metadata did not match.");

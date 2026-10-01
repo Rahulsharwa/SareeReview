@@ -1997,6 +1997,7 @@ async function submitUploadSareeBaserowForm(form) {
 
 async function submitUploadSareeDirect(form) {
   const submitBtn = document.getElementById("uploadSubmitBtn");
+  let serverOwnsStagingCleanup = false;
 
   try {
     const selectedItems = validateSelectedUploadFiles();
@@ -2054,6 +2055,7 @@ async function submitUploadSareeDirect(form) {
 
     showUploadProgress("Saving to Baserow...", 96);
     try {
+      serverOwnsStagingCleanup = true;
       await uploadApiCall(UPLOAD_API.finalize, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -2084,7 +2086,9 @@ async function submitUploadSareeDirect(form) {
       setUploadMessage(error.message || "Upload failed.", true);
       showUploadToast(error.message || "Upload failed.", true);
     }
-    await cleanupUploadedBlobPaths(uploadSareeState.uploadedBlobPaths);
+    if (!serverOwnsStagingCleanup) {
+      await cleanupUploadedBlobPaths(uploadSareeState.uploadedBlobPaths);
+    }
   } finally {
     uploadSareeState.isUploading = false;
     uploadSareeState.submitting = false;
